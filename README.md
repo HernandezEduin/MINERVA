@@ -240,15 +240,12 @@ If you use this code, please cite the original MINERVA paper:
 If you use the enhanced implementations or natural language question answering capabilities, please also consider citing this repository:
 
 ```bibtex
-<!-- TODO: Add citation for upcoming paper on enhanced MINERVA implementation
-@inproceedings{minerva_enhanced,
-  title = {[Paper title to be determined]},
-  author = {Hernandez, Eduin and Garcia, Luis, and Askar, Nurassyl, and Rini, Stefano},
-  booktitle = {[Conference/Journal to be determined]},
-  year = {[Year to be determined]},
-  url = {https://github.com/HalcyonSolutions/MINERVA}
+@article{hernandez2026theseus,
+  author  = {Hernandez, Eduin E. and Garcia, Luis F. and Askar, Nurassyl and Diaz, Sergio A. and Rini, Stefano},
+  title   = {Theseus in the Graph: Towards Traceable Multi-Hop Graph Navigation},
+  journal = {arXiv preprint arXiv:2609.14528},
+  year    = {2026}
 }
--->
 ```
 
 For now, you can reference this repository directly:
