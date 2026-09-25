@@ -1,6 +1,6 @@
 # Evaluation configuration for MQuAKE-ST Multi-Answer dataset (n-hop QA)
 
-base_output_dir: "checkpoints/mquake_st/"
+base_output_dir: "output/mquake_st/"
 batch_size: 32
 test_batch_size: 128
 beta: 0.05
@@ -34,4 +34,4 @@ raw_QAData_path: "${data_input_dir}/mquake_ma_qa_nhop.csv"
 cached_QAMetaData_path: "./.cache/itl/mquake_ma_qa_nhop.json"
 print_paths: True
 load_model: True
-model_load_dir: "${base_output_dir}ma_qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"
+model_load_dir: "checkpoints/mquake_st/ma_qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"

@@ -1,6 +1,6 @@
 # Evaluation configuration for MetaQA dataset (n-hop QA)
 
-base_output_dir: "checkpoints/metaqa/"
+base_output_dir: "output/metaqa/"
 batch_size: 128
 test_batch_size: 256
 beta: 0.05
@@ -34,4 +34,4 @@ raw_QAData_path: "${data_input_dir}/metaqa_qa_nhop.csv"
 cached_QAMetaData_path: "./.cache/itl/metaqa_qa_nhop.json"
 print_paths: True
 load_model: True
-model_load_dir: "${base_output_dir}qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"
+model_load_dir: "checkpoints/metaqa/qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"
