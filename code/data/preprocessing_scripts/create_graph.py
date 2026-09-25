@@ -6,7 +6,7 @@ import re
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Create a graph for the dataset")
-    parser.add_argument("--dataset", type=str, default="kinshiphinton",
+    parser.add_argument("--dataset", type=str, default="kinship",
                         help="Name of the dataset to create the graph for")
     parser.add_argument("--root_dir", type=str, default="../../../",
                         help="Root directory for the dataset")

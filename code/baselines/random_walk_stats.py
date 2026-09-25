@@ -27,9 +27,9 @@ METRIC_NAMES = ["PED", "RED", "F1_SG", "F1_Rel"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Random-walk path-fidelity baseline for MINERVA/THESEUS evaluation.")
-    parser.add_argument("--triplet-path", "--data-input-dir", dest="data_input_dir", default="./datasets/nlq/kinshiphinton_v2/",
+    parser.add_argument("--triplet-path", "--data-input-dir", dest="data_input_dir", default="./datasets/nlq/kinship/",
                         help="Directory containing graph files and vocab/.")
-    parser.add_argument("--question-path", default="./datasets/nlq/kinshiphinton_v2/kinship_qa_nhop.csv",
+    parser.add_argument("--question-path", default="./datasets/nlq/kinship/kinship_qa_nhop.csv",
                         help="Raw QA CSV file.")
     parser.add_argument("--cached-qa-metadata-path", default=None,
                         help="Cached QA metadata JSON. Defaults to ./.cache/itl/<question basename>.json.")
