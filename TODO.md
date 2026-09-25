@@ -5,3 +5,8 @@ TODO List:
 - [ ] Add Path-Key into the Data Loading
 - [ ] Use implicit Multi-Answer from the Data Loading instead of manually trigerring it from options
 - [ ] Add per hop accuracy
+- [ ] Ensure Refactor Semantic Movement from Env to Grapher still gives the same multi-answer results.
+- [ ] Move excess readme information into docs folder
+- [ ] Correct the README to reflect the new changes in the codebase
+- [ ] Correct the metrics.md to reflect the new changes in the codebase and arxiv paper
+- [ ] Rename the metrics functions and wandb metrics to reflect the new changes in the arxiv paper
