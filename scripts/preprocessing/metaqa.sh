@@ -10,8 +10,6 @@ set -euo pipefail
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/metaqa
 
-export PYTHONPATH="."
-
 SUBFOLDER="${1:-nlq}"
 
 RAW_DIR="./raw_data/metaqa_dataset"
@@ -41,20 +39,9 @@ cp "${RAW_DIR}/README.md" \
 cp "${RAW_DIR}/LICENSE" \
    "${OUTPUT_DIR}/LICENSE"
 
-echo "Preprocessing dataset: MetaQA"
+echo "Preparing MetaQA dataset..."
 
-cmd=(python code/data/preprocessing_scripts/create_graph.py --root_dir "./" -f --data_dir "datasets/${SUBFOLDER}/" --dataset metaqa)
+bash scripts/preprocessing/dataset.sh metaqa "${SUBFOLDER}" EID RID
 
-echo "Creating graph for MetaQA..."
-"${cmd[@]}"
-
-cmd=(python code/data/preprocessing_scripts/create_vocab.py --root_dir "./" --data_dir "datasets/${SUBFOLDER}/" --dataset metaqa)
-echo "Creating vocabs for MetaQA..."
-"${cmd[@]}"
-
-cmd=(python code/data/preprocessing_scripts/create_vocab_title.py --root_dir "./" --data_dir "datasets/${SUBFOLDER}/" --dataset metaqa --node_data_key EID --relation_data_key RID)
-echo "Creating human-readable vocab mapping for MetaQA..."
-"${cmd[@]}"
-
-echo "MetaQA preprocessing complete."
+echo "MetaQA dataset preparation complete."
 echo "Files written to ${OUTPUT_DIR}/"

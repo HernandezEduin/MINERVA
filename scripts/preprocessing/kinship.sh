@@ -14,7 +14,6 @@ set -euo pipefail
 #
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/kinship/
-export PYTHONPATH="."
 
 SUBFOLDER="${1:-nlq}"
 
@@ -39,15 +38,9 @@ cp "${RAW_DIR}/LICENSE" \
    "${OUTPUT_DIR}/LICENSE"
 
 
-echo "Preprocessing dataset: Kinship"
+echo "Preparing Kinship dataset..."
 
-cmd=(python code/data/preprocessing_scripts/create_graph.py --root_dir "./" -f --data_dir "datasets/${SUBFOLDER}/" --dataset kinship)
-echo "Creating graph for Kinship..."
-"${cmd[@]}"
+bash scripts/preprocessing/dataset.sh kinship "${SUBFOLDER}"
 
-cmd=(python code/data/preprocessing_scripts/create_vocab.py --root_dir "./" --data_dir "datasets/${SUBFOLDER}/" --dataset kinship)
-echo "Creating vocabs for Kinship..."
-"${cmd[@]}"
-
-echo "Kinship preprocessing complete."
+echo "Kinship dataset preparation complete."
 echo "Files written to ${OUTPUT_DIR}/"

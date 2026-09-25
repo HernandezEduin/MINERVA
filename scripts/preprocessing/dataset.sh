@@ -1,22 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 export PYTHONPATH="."
 
-dataset_name="$1"
-node_data_key="$2"
-rel_data_key="$3"
+DATASET_NAME="$1"
+SUBFOLDER="${2:-nlq}"
+NODE_DATA_KEY="${3:-}"
+REL_DATA_KEY="${4:-}"
 
-echo "Preprocessing dataset: $dataset_name"
+DATA_DIR="datasets/${SUBFOLDER}/"
 
-cmd=(python code/data/preprocessing_scripts/create_graph.py --root_dir "./" -f --data_dir "datasets/nlq/" --dataset "$dataset_name")
+echo "Preprocessing dataset: ${DATASET_NAME}"
 
-echo "Executing: ${cmd[*]}"
+cmd=(
+    python code/data/preprocessing_scripts/create_graph.py
+    --root_dir "./"
+    -f
+    --data_dir "${DATA_DIR}"
+    --dataset "${DATASET_NAME}"
+)
+echo "Creating graph for ${DATASET_NAME}..."
 "${cmd[@]}"
 
-cmd=(python code/data/preprocessing_scripts/create_vocab.py --root_dir "./" --data_dir "datasets/nlq/" --dataset "$dataset_name")
-echo "Executing: ${cmd[*]}"
+cmd=(
+    python code/data/preprocessing_scripts/create_vocab.py
+    --root_dir "./"
+    --data_dir "${DATA_DIR}"
+    --dataset "${DATASET_NAME}"
+)
+echo "Creating vocabs for ${DATASET_NAME}..."
 "${cmd[@]}"
-# check if node_data_key and rel_data_key are not empty, if not empty, run create_vocab_title.py
-if [[ -n "$node_data_key" ]] && [[ -n "$rel_data_key" ]]; then
-    cmd=(python code/data/preprocessing_scripts/create_vocab_title.py --root_dir "./" --data_dir "datasets/nlq/" --dataset "$dataset_name" --node_data_key "$node_data_key" --relation_data_key "$rel_data_key")
-    echo "Executing: ${cmd[*]}"
+
+if [[ -n "${NODE_DATA_KEY}" && -n "${REL_DATA_KEY}" ]]; then
+    cmd=(
+        python code/data/preprocessing_scripts/create_vocab_title.py
+        --root_dir "./"
+        --data_dir "${DATA_DIR}"
+        --dataset "${DATASET_NAME}"
+        --node_data_key "${NODE_DATA_KEY}"
+        --relation_data_key "${REL_DATA_KEY}"
+    )
+    echo "Creating human-readable vocab mapping for ${DATASET_NAME}..."
     "${cmd[@]}"
 fi
+
+echo "${DATASET_NAME} preprocessing complete."

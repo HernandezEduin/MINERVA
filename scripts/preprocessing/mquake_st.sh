@@ -15,7 +15,6 @@ set -euo pipefail
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/mquake_st
 
-export PYTHONPATH="."
 
 SUBFOLDER="${1:-nlq}"
 
@@ -49,20 +48,9 @@ cp "${RAW_DIR}/README.md" \
 cp "${RAW_DIR}/LICENSE" \
    "${OUTPUT_DIR}/LICENSE"
 
-echo "Preprocessing dataset: MQuAKE-ST"
+echo "Preparing MQuAKE-ST dataset..."
 
-cmd=(python code/data/preprocessing_scripts/create_graph.py --root_dir "./" -f --data_dir "datasets/${SUBFOLDER}/" --dataset mquake_st)
+bash scripts/preprocessing/dataset.sh mquake_st "${SUBFOLDER}" QID Property
 
-echo "Creating graph for MQuAKE-ST..."
-"${cmd[@]}"
-
-cmd=(python code/data/preprocessing_scripts/create_vocab.py --root_dir "./" --data_dir "datasets/${SUBFOLDER}/" --dataset mquake_st)
-echo "Creating vocabs for MQuAKE-ST..."
-"${cmd[@]}"
-
-cmd=(python code/data/preprocessing_scripts/create_vocab_title.py --root_dir "./" --data_dir "datasets/${SUBFOLDER}/" --dataset mquake_st --node_data_key QID --relation_data_key Property)
-echo "Creating human-readable vocab mapping for MQuAKE-ST..."
-"${cmd[@]}"
-
-echo "MQuAKE-ST preprocessing complete."
+echo "MQuAKE-ST dataset preparation complete."
 echo "Files written to ${OUTPUT_DIR}/"
