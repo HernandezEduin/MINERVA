@@ -9,3 +9,7 @@
 /wandb/*
 # /configs/*
 /temp/*
+/checkpoints/*
+/scripts/baselines/dev/**
+/configs/dev/**
+/configs/test/**
