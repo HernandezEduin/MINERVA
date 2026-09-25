@@ -13,3 +13,4 @@
 /scripts/baselines/dev/**
 /configs/dev/**
 /configs/test/**
+/raw_data/*
