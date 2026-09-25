@@ -1,4 +1,4 @@
-# best configurations for QA hops 2, 3, 4
+# Evaluation configuration for MQuAKE-ST Single-Answer dataset (n-hop QA)
 
 base_output_dir: "checkpoints/mquake_st/"
 batch_size: 32
