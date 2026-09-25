@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run Kinship path-fidelity baselines from the repo root.
+# Run MQuAKE-ST multi-answer path-fidelity baselines from the repo root.
 # Usage:
-#   bash configs/bash/run_kinship_baselines.sh
-#   bash configs/bash/run_kinship_baselines.sh 0 42 100
+#   bash scripts/baselines/run_mquake_st_ma.sh
+#   bash scripts/baselines/run_mquake_st_ma.sh 0 42 100
 
 seeds=("$@")
 if [[ $# -eq 0 ]]; then
@@ -14,18 +14,17 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-output_dir="output/kinshiphinton/baselines"
+output_dir="output/mquake_st/baselines"
 mkdir -p "$output_dir"
 
 common_args=(
-  --data-input-dir ./datasets/nlq/kinshiphinton_v2/
-  --question-path ./datasets/nlq/kinshiphinton_v2/kinship_qa_nhop.csv
-  --cached-qa-metadata-path ./.cache/itl/kinship_qa_nhop.json
+  --data-input-dir ./datasets/nlq/mquake_st/
+  --question-path ./datasets/nlq/mquake_st/mquake_ma_qa_nhop.csv
+  --cached-qa-metadata-path ./.cache/itl/mquake_ma_qa_nhop.json
   --test-only
   --use-self-loops
   --use-full-graph
-  --num-rollout-steps 3
-  --max-num-actions 100
+  --num-rollout-steps 4
 )
 
 for seed in "${seeds[@]}"; do
@@ -33,10 +32,10 @@ for seed in "${seeds[@]}"; do
     "${common_args[@]}" \
     --num-walks 100 \
     --seed "$seed" \
-    --output "$output_dir/random_walk_stats_kinship_seed${seed}.json"
+    --output "$output_dir/random_walk_stats_mquake_ma_seed${seed}.json"
 
   conda run -n minerva_tf2 python -m code.baselines.shortcut_oracle_stats \
     "${common_args[@]}" \
     --seed "$seed" \
-    --output "$output_dir/shortcut_oracle_stats_kinship_seed${seed}.json"
+    --output "$output_dir/shortcut_oracle_stats_mquake_ma_seed${seed}.json"
 done

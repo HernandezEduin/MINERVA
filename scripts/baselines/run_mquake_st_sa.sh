@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run MQuAKE-ST multi-answer path-fidelity baselines from the repo root.
+# Run MQuAKE-ST single-answer path-fidelity baselines from the repo root.
 # Usage:
-#   bash configs/bash/run_mquake_st_multi_answer_baselines.sh
-#   bash configs/bash/run_mquake_st_multi_answer_baselines.sh 0 42 100
+#   bash scripts/baselines/run_mquake_st_sa.sh
+#   bash scripts/baselines/run_mquake_st_sa.sh 0 42 100
 
 seeds=("$@")
 if [[ $# -eq 0 ]]; then
@@ -19,8 +19,8 @@ mkdir -p "$output_dir"
 
 common_args=(
   --data-input-dir ./datasets/nlq/mquake_st/
-  --question-path ./datasets/nlq/mquake_st/mquake_ma_qa_nhop.csv
-  --cached-qa-metadata-path ./.cache/itl/mquake_ma_qa_nhop.json
+  --question-path ./datasets/nlq/mquake_st/mquake_sa_qa_nhop.csv
+  --cached-qa-metadata-path ./.cache/itl/mquake_sa_qa_nhop.json
   --test-only
   --use-self-loops
   --use-full-graph
@@ -32,10 +32,10 @@ for seed in "${seeds[@]}"; do
     "${common_args[@]}" \
     --num-walks 100 \
     --seed "$seed" \
-    --output "$output_dir/random_walk_stats_mquake_ma_seed${seed}.json"
+    --output "$output_dir/random_walk_stats_mquake_sa_seed${seed}.json"
 
   conda run -n minerva_tf2 python -m code.baselines.shortcut_oracle_stats \
     "${common_args[@]}" \
     --seed "$seed" \
-    --output "$output_dir/shortcut_oracle_stats_mquake_ma_seed${seed}.json"
+    --output "$output_dir/shortcut_oracle_stats_mquake_sa_seed${seed}.json"
 done
