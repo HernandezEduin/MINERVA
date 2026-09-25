@@ -244,7 +244,7 @@ def read_options() -> Dict[str, Any]:
     parsed['path_logger_file'] = parsed['output_dir']
     parsed['log_file_name'] = os.path.join(parsed['output_dir'], 'log.txt')
     os.makedirs(parsed['output_dir'])
-    os.mkdir(parsed['model_dir'])
+    if not parsed["load_model"]: os.mkdir(parsed['model_dir']) 
 
     with open(os.path.join(parsed['output_dir'], 'config.json'), 'w') as out:
         # sort keys for consistency
