@@ -1,0 +1,47 @@
+# best configurations for QA hops 2, 3, 4
+
+base_output_dir: "output/mquake_st/"
+batch_size: 32
+test_batch_size: 128
+beta: 0.05
+data_input_dir: "datasets/nlq/mquake_st/"
+embedding_size: 50
+eval_every: 100
+gamma: 1.00
+hidden_size: 50
+Lambda: 0.05
+learning_rate: 0.001
+load_model: False
+max_num_actions: 200
+num_rollouts: 20
+test_rollouts: 100
+total_iterations: 15000 # original 15000
+train_entity_embeddings: True
+train_relation_embeddings: True
+print_predictions: False
+question_tokenizer_name: "bert-base-uncased"
+use_beam: True
+use_entity_embeddings: True
+vocab_dir: "${data_input_dir}vocab"
+wandb_project: "mquake-minerva"
+
+# Recommended variables to tune
+seed: 100
+use_full_graph: True
+use_directed_graph: True
+use_stop_signal: False
+use_restart_signal: False
+projection_adapter: "linear" # options: 'none', 'linear', 'mlp', 'residual'
+projection_layers: 1
+projection_hidden: 256
+path_length: 4
+question_format: "full_text"  # options: 'full_text', 'paraphrased', 'relation_only', 'graph_only'
+evaluate_paraphrases: False
+use_weighted_hop_sampling: False
+raw_QAData_path: "${data_input_dir}/mquake_sa_qa_nhop.csv"
+cached_QAMetaData_path: "./.cache/itl/mquake_sa_qa_nhop.json"
+print_paths: True
+wandb_name: "sa_qa_nhop_reason_${path_length}hop_seed${seed}"
+wandb_tags: ["MQuAKE-ST", "${path_length}-hop", "Directed Graph", "Mix-hop", "Single Answer"]
+track: True
+timestamp: "sa_qa_nhop_reason_${path_length}hop_seed${seed}"
