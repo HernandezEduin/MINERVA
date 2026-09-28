@@ -1,6 +1,6 @@
 # Evaluation Metrics
 
-This document describes the metrics implemented by the current natural-language MINERVA evaluator. The terminology is aligned with *Theseus in the Graph: Towards Traceable Multi-Hop Graph Navigation*, where answer correctness is evaluated together with the explicit navigation trajectory.
+This document describes the metrics implemented by the current natural-language MINERVA evaluator. The terminology is aligned with the accompanying submission, where answer correctness is evaluated together with the explicit navigation trajectory.
 
 The authoritative implementations are in:
 
@@ -266,9 +266,9 @@ These are primarily debugging/analysis statistics rather than headline task metr
 
 ## 15. Structural calibration references
 
-The path-fidelity numbers in *Theseus in the Graph* are accompanied by two **non-learned structural calibration references**. They are intended to make the scale of PED, RED, F1_SG, and F1_REL easier to interpret; they are not competing KGQA models.
+The path-fidelity numbers in the accompanying submission are accompanied by two **non-learned structural calibration references**. They are intended to make the scale of PED, RED, F1_SG, and F1_REL easier to interpret; they are not competing KGQA models.
 
-The implementations are in [<code>code/baselines/</code>](https://github.com/HernandezEduin/MINERVA/tree/master/code/baselines), and the dataset-level launchers are in <code>scripts/baselines/</code>. The definitions follow Appendix A.4 of [*Theseus in the Graph*](https://arxiv.org/abs/2609.14528).
+The implementations are in [<code>code/baselines/</code>](../code/baselines/), and the dataset-level launchers are in <code>scripts/baselines/</code>. The definitions follow Appendix A.4 of the accompanying submission.
 
 ### RW-Ans_MC and the unbiased random-walk reference
 
