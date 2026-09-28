@@ -51,17 +51,13 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 ### 2. Prepare a dataset
 
-Kinship is the smallest bundled example workflow:
+Kinship is the smallest bundled example workflow. Download the blind dataset from [Kaggle](https://www.kaggle.com/datasets/anonymousexpert/kinship), extract it under <code>raw_data/kinship_hinton/</code>, then run:
 
 ~~~bash
-huggingface-cli download HalcyonSolutions/Kinship \
-  --repo-type dataset \
-  --local-dir ./raw_data/kinship_hinton
-
 bash scripts/preprocessing/kinship.sh
 ~~~
 
-The preprocessing scripts create the graph and vocabularies expected by MINERVA under <code>datasets/nlq/</code>.
+The preprocessing scripts create the graph and vocabularies expected by MINERVA under <code>datasets/nlq/</code>. See [Getting started](docs/getting_started.md) for the complete blind dataset setup.
 
 ### 3. Train
 
