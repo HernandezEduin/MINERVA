@@ -29,31 +29,15 @@ bash scripts/run_nlq.sh configs/kinship/train.yaml
 
 ## 2. Dataset preparation
 
-The repository provides preprocessing wrappers for the datasets used by the navigation experiments. They copy the navigation-ready source files into <code>datasets/nlq/&lt;dataset&gt;/</code>, build the graph representation, and create the entity/relation vocabularies required by MINERVA.
+The repository provides preprocessing wrappers for the navigation datasets. They copy the navigation-ready source files into <code>datasets/nlq/&lt;dataset&gt;/</code>, build the graph representation, and create the entity/relation vocabularies required by MINERVA.
 
-The central [THESEUS project page](https://github.com/HalcyonSolutions/THESEUS) indexes the released datasets, Google Cloud mirrors, adapted agents, and pretrained checkpoints.
+For blind evaluation, use the anonymized dataset mirrors below.
 
 ### Kinship
 
-**Dataset:** [Hugging Face](https://huggingface.co/datasets/HalcyonSolutions/Kinship) · [Google Cloud mirror](https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/Kinship/index.html)
+**Blind dataset:** [Kaggle](https://www.kaggle.com/datasets/anonymousexpert/kinship)
 
-Using Hugging Face:
-
-~~~bash
-huggingface-cli download HalcyonSolutions/Kinship \
-  --repo-type dataset \
-  --local-dir ./raw_data/kinship_hinton
-~~~
-
-Alternatively, copy the dataset archive link from the Google Cloud mirror and download it with `wget`:
-
-~~~bash
-wget https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/Kinship/kinship_dataset.zip
-
-unzip kinship_dataset.zip -d ./raw_data/
-~~~
-
-The archive already contains the directory expected by the preprocessing script:
+Download the dataset archive from the page above and extract it so that the repository contains:
 
 ~~~text
 raw_data/
@@ -64,7 +48,7 @@ raw_data/
     └── LICENSE
 ~~~
 
-Then preprocess the dataset:
+Then preprocess it:
 
 ~~~bash
 bash scripts/preprocessing/kinship.sh
@@ -76,7 +60,7 @@ The processed dataset is written under:
 datasets/nlq/kinship/
 ~~~
 
-including the QA file:
+including:
 
 ~~~text
 kinship_qa_nhop.csv
@@ -84,25 +68,9 @@ kinship_qa_nhop.csv
 
 ### MQuAKE-ST
 
-**Dataset:** [Hugging Face](https://huggingface.co/datasets/HalcyonSolutions/MQuAKE-ST) · [Google Cloud mirror](https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MQuAKE_ST/index.html)
+**Blind dataset:** [Kaggle](https://www.kaggle.com/datasets/anonymousexpert/mquake-st)
 
-Using Hugging Face:
-
-~~~bash
-huggingface-cli download HalcyonSolutions/MQuAKE-ST \
-  --repo-type dataset \
-  --local-dir ./raw_data/mquake_st_dataset
-~~~
-
-Alternatively, using the Google Cloud mirror:
-
-~~~bash
-wget https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MQuAKE_ST/mquake_st_dataset.zip
-
-unzip mquake_st_dataset.zip -d ./raw_data/
-~~~
-
-The archive already contains the directory expected by the preprocessing script:
+Download the dataset archive from the page above and extract it so that the repository contains:
 
 ~~~text
 raw_data/
@@ -114,7 +82,7 @@ raw_data/
     └── LICENSE
 ~~~
 
-Then preprocess the dataset:
+Then preprocess it:
 
 ~~~bash
 bash scripts/preprocessing/mquake_st.sh
@@ -135,19 +103,7 @@ mquake_ma_qa_nhop.csv
 
 ### MetaQA
 
-**Dataset:** [Original MetaQA repository](https://github.com/yuyuz/MetaQA) · [THESEUS Google Cloud mirror](https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MetaQA/index.html)
-
-MINERVA uses the navigation-ready THESEUS version rather than the original MetaQA directory layout.
-
-Download the archive from the Google Cloud mirror and extract it under `raw_data/`: 
-
-~~~bash
-wget https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MetaQA/metaqa_dataset.zip
-
-unzip metaqa_dataset.zip -d ./raw_data/
-~~~
-
-The archive already contains the directory expected by the preprocessing script:
+The preprocessing wrapper expects the navigation-ready files to be placed under:
 
 ~~~text
 raw_data/
@@ -185,7 +141,7 @@ metaqa_qa_nhop.csv
 
 The dataset wrappers under <code>scripts/preprocessing/</code> copy the required source files and invoke the shared preprocessing utilities in <code>code/data/preprocessing_scripts/</code>.
 
-For the supplied datasets, preprocessing creates the graph representation and entity/relation vocabularies required by MINERVA, resulting in a layout similar to:
+For the supplied datasets, preprocessing creates a layout similar to:
 
 ~~~text
 datasets/nlq/<dataset>/
@@ -260,51 +216,36 @@ See [Evaluation metrics](metrics.md) for the exact ranking, path-fidelity, answe
 
 ## 6. Pretrained checkpoints
 
-Pretrained MINERVA checkpoints for the experiments reported in [*Theseus in the Graph*](https://arxiv.org/abs/2609.14528) are released from the central [THESEUS project page](https://github.com/HalcyonSolutions/THESEUS). Each setting is provided for **three random seeds: 0, 42, and 100**.
+Pretrained checkpoints for the blind evaluation are available from the anonymized model page:
 
-| Dataset / setting | Checkpoint page | Expected checkpoint prefix |
-| --- | --- | --- |
-| Kinship | [Download page](https://storage.googleapis.com/halcyon_data/multihop_ds/conferences/all/minerva/kinshiphinton/index.html) | <code>checkpoints/kinship/qa_nhop_reason_3hop_seed&lt;seed&gt;/model/model.ckpt</code> |
-| MQuAKE-ST single-answer | [Download page](https://storage.googleapis.com/halcyon_data/multihop_ds/conferences/all/minerva/mquake_st/single_answers/index.html) | <code>checkpoints/mquake_st/sa_qa_nhop_reason_4hop_seed&lt;seed&gt;/model/model.ckpt</code> |
-| MQuAKE-ST multi-answer | [Download page](https://storage.googleapis.com/halcyon_data/multihop_ds/conferences/all/minerva/mquake_st/multi_answers/index.html) | <code>checkpoints/mquake_st/ma_qa_nhop_reason_4hop_seed&lt;seed&gt;/model/model.ckpt</code> |
-| MetaQA | [Download page](https://storage.googleapis.com/halcyon_data/multihop_ds/conferences/all/minerva/metaqa/index.html) | <code>checkpoints/metaqa/qa_nhop_reason_3hop_seed&lt;seed&gt;/model/model.ckpt</code> |
+**Checkpoints:** [Kaggle](https://www.kaggle.com/models/anonymousexpert/minerva-kgqa)
+
+Each released setting provides **three random seeds: 0, 42, and 100**.
+
+| Dataset / setting | Expected checkpoint prefix |
+| --- | --- |
+| Kinship | <code>checkpoints/kinship/qa_nhop_reason_3hop_seed&lt;seed&gt;/model/model.ckpt</code> |
+| MQuAKE-ST single-answer | <code>checkpoints/mquake_st/sa_qa_nhop_reason_4hop_seed&lt;seed&gt;/model/model.ckpt</code> |
+| MQuAKE-ST multi-answer | <code>checkpoints/mquake_st/ma_qa_nhop_reason_4hop_seed&lt;seed&gt;/model/model.ckpt</code> |
+| MetaQA | <code>checkpoints/metaqa/qa_nhop_reason_3hop_seed&lt;seed&gt;/model/model.ckpt</code> |
 
 ### Downloading a checkpoint
 
-Each checkpoint page provides one archive per released seed:
+From the Kaggle model page, download the archive for the desired seed:
 
-- `seed0.zip`
-- `seed42.zip`
-- `seed100.zip`
+- <code>seed0.zip</code>
+- <code>seed42.zip</code>
+- <code>seed100.zip</code>
 
-Copy the link for the desired seed from the corresponding checkpoint page, download it with `wget`, and extract it into the dataset checkpoint directory.
-
-For example, to download **MQuAKE-ST multi-answer, seed 0**:
+Extract the archive into the corresponding dataset checkpoint directory. For example, after downloading the MQuAKE-ST multi-answer seed-0 archive:
 
 ~~~bash
-wget https://storage.googleapis.com/halcyon_data/multihop_ds/conferences/all/minerva/mquake_st/multi_answers/seed0.zip
-
 unzip seed0.zip -d ./checkpoints/mquake_st/
 ~~~
 
-The archive already contains the run-specific directory expected by the evaluation configuration. After extraction, the example above produces:
+The archive already contains the run-specific directory expected by the evaluation configuration.
 
-~~~text
-checkpoints/
-└── mquake_st/
-    └── ma_qa_nhop_reason_4hop_seed0/
-        ├── config.json
-        ├── LICENSE
-        ├── model/
-        │   ├── checkpoint
-        │   ├── model.ckpt.data-00000-of-00001
-        │   ├── model.ckpt.index
-        │   └── model.ckpt.meta
-        ├── scores.txt
-        └── test_beam/
-~~~
-
-Use the corresponding destination directory for each dataset:
+Use the corresponding destination directory:
 
 | Dataset | Extract into |
 | --- | --- |
@@ -313,7 +254,7 @@ Use the corresponding destination directory for each dataset:
 | MQuAKE-ST multi-answer | <code>./checkpoints/mquake_st/</code> |
 | MetaQA | <code>./checkpoints/metaqa/</code> |
 
-The current evaluation configurations use <code>seed: 0</code> by default. Their <code>model_load_dir</code> values interpolate the configured seed and path length, so changing <code>seed</code> automatically changes the checkpoint location expected by the evaluator.
+The evaluation configurations use <code>seed: 0</code> by default. Their <code>model_load_dir</code> values interpolate the configured seed and path length, so changing <code>seed</code> automatically changes the expected checkpoint location.
 
 For example:
 
@@ -323,17 +264,17 @@ path_length: 3
 model_load_dir: "checkpoints/kinship/qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"
 ~~~
 
-To evaluate another released checkpoint, download the corresponding `seed42.zip` or `seed100.zip` archive and update the <code>seed</code> field in the evaluation YAML.
-
 With the checkpoint in place, run evaluation normally:
 
 ~~~bash
 bash scripts/run_eval.sh configs/kinship/evaluate.yaml 0
 ~~~
 
+To evaluate another released seed, download the corresponding archive and update the <code>seed</code> field in the evaluation YAML.
+
 ## 7. Structural calibration baselines
 
-The repository includes the non-learned structural calibration references used in [*Theseus in the Graph*](https://arxiv.org/abs/2609.14528), including the definitions discussed in Appendix A.4. These references operate on the **actual evaluator navigation graph and action space** rather than serving as learned KGQA systems.
+The repository includes the non-learned structural calibration references used in the accompanying submission, including the definitions discussed in Appendix A.4. These references operate on the **actual evaluator navigation graph and action space** rather than serving as learned KGQA systems.
 
 - **RW-Ans_MC / unbiased random walk:** samples uniform random navigation trajectories. The supplied scripts use **100 walks per question** and, by default, the three seeds **0, 42, and 100**. The terminal answer-hit rate is the Monte Carlo <code>RW-Ans_MC</code> calibration; the same sampled trajectories are also evaluated with PED, RED, F1_SG, and F1_REL when the required references are available.
 - **Shortest Path Oracle:** is given the valid answer set and finds a shortest graph path from the topic entity to a valid answer, but it does **not** use the natural-language question. Its trajectory is evaluated with the same path-fidelity metrics. It is a structural reference, not a path-fidelity upper or lower bound.
@@ -356,7 +297,7 @@ bash scripts/baselines/run_mquake_st_sa.sh 0 100
 
 Machine-readable results are written below <code>output/&lt;dataset&gt;/baselines/</code>. In the random-walk JSON output, the paper's <code>RW-Ans_MC</code> quantity is stored under the summary key <code>RW_Ans</code>.
 
-See [Evaluation metrics](metrics.md#15-structural-calibration-references) for the interpretation of these references and [<code>code/baselines/</code>](https://github.com/HernandezEduin/MINERVA/tree/master/code/baselines) for the implementations.
+See [Evaluation metrics](metrics.md#15-structural-calibration-references) for the interpretation of these references and [<code>code/baselines/</code>](../code/baselines/) for the implementations.
 
 ## 8. Important configuration groups
 
@@ -424,4 +365,3 @@ Use a directory containing only training configurations that you actually want t
 - [Architecture](architecture.md): model and code organization.
 - [Data format](data_format.md): graph and QA schemas.
 - [Evaluation metrics](metrics.md): exact evaluator behavior, metric definitions, and structural calibration references.
-- [THESEUS](https://github.com/HalcyonSolutions/THESEUS): central project landing page for datasets, adapted agents, and released checkpoints.
