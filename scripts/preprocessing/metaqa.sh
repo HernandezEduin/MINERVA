@@ -4,9 +4,6 @@ set -euo pipefail
 # This preprocessing assumes that the MQuAKE-ST dataset has been downloaded to:
 #   ./raw_data/metaqa_dataset
 #
-# It is available from the HalcyonSolutions dataset storage:
-#   https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MetaQA/index.html
-#
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/metaqa
 

@@ -4,14 +4,6 @@ set -euo pipefail
 # This preprocessing assumes that the Kinship dataset has been downloaded to:
 #   ./raw_data/kinship_hinton
 #
-# The dataset can be downloaded from Hugging Face:
-#   huggingface-cli download HalcyonSolutions/Kinship \
-#       --repo-type dataset \
-#       --local-dir ./raw_data/kinship_hinton
-#
-# It is also available from the HalcyonSolutions dataset storage:
-#   https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/Kinship/index.html
-#
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/kinship/
 

@@ -4,14 +4,6 @@ set -euo pipefail
 # This preprocessing assumes that the MQuAKE-ST dataset has been downloaded to:
 #   ./raw_data/mquake_st_dataset
 #
-# The dataset can be downloaded from Hugging Face:
-#   huggingface-cli download HalcyonSolutions/MQuAKE-ST \
-#       --repo-type dataset \
-#       --local-dir ./raw_data/mquake_st_dataset
-#
-# It is also available from the HalcyonSolutions dataset storage:
-#   https://storage.googleapis.com/halcyon_data/multihop_ds/datasets/MQuAKE-ST/index.html
-#
 # This script copies the required KG and QA files into:
 #   ./datasets/${SUBFOLDER}/mquake_st
 
