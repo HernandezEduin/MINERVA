@@ -51,7 +51,7 @@ export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 ### 2. Prepare a dataset
 
-Kinship is the smallest bundled example workflow. Download the blind dataset from [Kaggle](https://www.kaggle.com/datasets/anonymousexpert/kinship), extract it under <code>raw_data/kinship_hinton/</code>, then run:
+Kinship is the smallest bundled example workflow. Download the blind dataset from [Kaggle](https://www.kaggle.com/datasets/anonymousexpert/kinship), extract it under <code>raw_data/</code>, then run:
 
 ~~~bash
 bash scripts/preprocessing/kinship.sh

@@ -101,42 +101,6 @@ mquake_sa_qa_nhop.csv
 mquake_ma_qa_nhop.csv
 ~~~
 
-### MetaQA
-
-The preprocessing wrapper expects the navigation-ready files to be placed under:
-
-~~~text
-raw_data/
-└── metaqa_dataset/
-    ├── kg/
-    │   └── triplets.txt
-    ├── metadata/
-    │   ├── node_data.csv
-    │   └── relation_data.csv
-    ├── qa/
-    │   └── metaqa_nhop.csv
-    ├── README.md
-    └── LICENSE
-~~~
-
-Then preprocess the dataset:
-
-~~~bash
-bash scripts/preprocessing/metaqa.sh
-~~~
-
-The processed dataset is written under:
-
-~~~text
-datasets/nlq/metaqa/
-~~~
-
-including:
-
-~~~text
-metaqa_qa_nhop.csv
-~~~
-
 ### What preprocessing creates
 
 The dataset wrappers under <code>scripts/preprocessing/</code> copy the required source files and invoke the shared preprocessing utilities in <code>code/data/preprocessing_scripts/</code>.
@@ -229,32 +193,32 @@ Each released setting provides **three random seeds: 0, 42, and 100**.
 | MQuAKE-ST multi-answer | <code>checkpoints/mquake_st/ma_qa_nhop_reason_4hop_seed&lt;seed&gt;/model/model.ckpt</code> |
 | MetaQA | <code>checkpoints/metaqa/qa_nhop_reason_3hop_seed&lt;seed&gt;/model/model.ckpt</code> |
 
-### Downloading a checkpoint
+### Downloading the checkpoints
 
-From the Kaggle model page, download the archive for the desired seed:
+Download the model archive from the Kaggle page above and extract it **at the repository root without creating an additional directory**.
 
-- <code>seed0.zip</code>
-- <code>seed42.zip</code>
-- <code>seed100.zip</code>
+The archive already contains the expected `checkpoints/` hierarchy and run-specific directories. After extraction, the repository should contain paths such as:
 
-Extract the archive into the corresponding dataset checkpoint directory. For example, after downloading the MQuAKE-ST multi-answer seed-0 archive:
-
-~~~bash
-unzip seed0.zip -d ./checkpoints/mquake_st/
+~~~text
+checkpoints/
+├── kinship/
+│   └── qa_nhop_reason_3hop_seed0/
+│       └── model/
+│           └── model.ckpt.*
+├── mquake_st/
+│   ├── sa_qa_nhop_reason_4hop_seed0/
+│   │   └── model/
+│   │       └── model.ckpt.*
+│   └── ma_qa_nhop_reason_4hop_seed0/
+│       └── model/
+│           └── model.ckpt.*
+└── metaqa/
+    └── qa_nhop_reason_3hop_seed0/
+        └── model/
+            └── model.ckpt.*
 ~~~
 
-The archive already contains the run-specific directory expected by the evaluation configuration.
-
-Use the corresponding destination directory:
-
-| Dataset | Extract into |
-| --- | --- |
-| Kinship | <code>./checkpoints/kinship/</code> |
-| MQuAKE-ST single-answer | <code>./checkpoints/mquake_st/</code> |
-| MQuAKE-ST multi-answer | <code>./checkpoints/mquake_st/</code> |
-| MetaQA | <code>./checkpoints/metaqa/</code> |
-
-The evaluation configurations use <code>seed: 0</code> by default. Their <code>model_load_dir</code> values interpolate the configured seed and path length, so changing <code>seed</code> automatically changes the expected checkpoint location.
+The evaluation configurations use <code>seed: 0</code> by default. Their <code>model_load_dir</code> values interpolate the configured seed and path length, so changing <code>seed</code> automatically changes the checkpoint location expected by the evaluator.
 
 For example:
 
@@ -264,13 +228,13 @@ path_length: 3
 model_load_dir: "checkpoints/kinship/qa_nhop_reason_${path_length}hop_seed${seed}/model/model.ckpt"
 ~~~
 
-With the checkpoint in place, run evaluation normally:
+To evaluate a different released seed, change the <code>seed</code> field in the evaluation YAML to `42` or `100`. The corresponding checkpoint directory must be present in the extracted archive.
+
+With the checkpoints in place, run evaluation normally:
 
 ~~~bash
 bash scripts/run_eval.sh configs/kinship/evaluate.yaml 0
 ~~~
-
-To evaluate another released seed, download the corresponding archive and update the <code>seed</code> field in the evaluation YAML.
 
 ## 7. Structural calibration baselines
 
