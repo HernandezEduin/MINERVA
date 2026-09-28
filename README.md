@@ -1,17 +1,14 @@
 # MINERVA: Natural-Language KG Navigation
 
-**Official MINERVA adaptation for [THESEUS](https://github.com/HalcyonSolutions/THESEUS)**
+**Blind-evaluation implementation**
 
-This repository adapts the reinforcement-learning navigation framework from [MINERVA](https://arxiv.org/abs/1711.05851) to **natural-language multi-hop knowledge graph question answering**. Instead of conditioning the agent on a symbolic query of the form (h, r, ?), the agent receives a **natural-language question**, a **topic entity**, and a **knowledge graph**, then navigates an explicit sequence of graph edges toward an answer.
+This repository adapts MINERVA to **natural-language multi-hop knowledge graph question answering**. Instead of conditioning the agent on a symbolic query of the form (h, r, ?), the agent receives a **natural-language question**, a **topic entity**, and a **knowledge graph**, then navigates an explicit sequence of graph edges toward an answer.
 
 ![MINERVA KG Navigation](images/minerva_navigation.gif)
+
 *At each hop, MINERVA uses the natural-language question together with its recurrent path state to score the executable relation–entity actions available from the current node. The selected edge moves the agent to the next entity, producing an explicit reasoning path whose terminal entity is used as the predicted answer.*
 
-This implementation is used in [*Theseus in the Graph: Towards Traceable Multi-Hop Graph Navigation*](https://arxiv.org/abs/2609.14528).
-
-> **Project hub:** [THESEUS](https://github.com/HalcyonSolutions/THESEUS) — datasets, other adapted navigation agents, pretrained checkpoints, and shared evaluation resources.  
-> **Original MINERVA paper:** [Go for a Walk and Arrive at the Answer](https://arxiv.org/abs/1711.05851)  
-> **Symbolic-query / KGC branch:** [minerva_tf1](https://github.com/HernandezEduin/MINERVA/tree/minerva_tf1)
+This branch is prepared for anonymous evaluation. Blind dataset and checkpoint resources are linked from the documentation; identifying project and author links are intentionally omitted.
 
 ## What is included
 
@@ -22,7 +19,7 @@ This implementation is used in [*Theseus in the Graph: Towards Traceable Multi-H
 - Optional STOP and RESTART actions.
 - Explicit trajectory logging and path-fidelity evaluation.
 - Dataset-specific configurations for **Kinship**, **MQuAKE-ST**, and **MetaQA**.
-- Pretrained MINERVA checkpoints for three seeds, released through **THESEUS**.
+- Pretrained MINERVA checkpoints for three released seeds.
 - Structural calibration baselines: **RW-Ans_MC** and the **Shortest Path Oracle**.
 - Preprocessing and baseline scripts under <code>scripts/</code>.
 
@@ -120,29 +117,9 @@ MINERVA/
 └── requirements.txt
 ~~~
 
-## Citation
+## Blind-review note
 
-If you use the natural-language graph-navigation adaptation in this repository, please cite *Theseus in the Graph*:
-
-~~~bibtex
-@article{hernandez2026theseus,
-  author  = {Hernandez, Eduin E. and Garcia, Luis F. and Askar, Nurassyl and Diaz, Sergio A. and Rini, Stefano},
-  title   = {Theseus in the Graph: Towards Traceable Multi-Hop Graph Navigation},
-  journal = {arXiv preprint arXiv:2609.14528},
-  year    = {2026}
-}
-~~~
-
-Please also cite the original MINERVA work:
-
-~~~bibtex
-@inproceedings{minerva,
-  title     = {Go for a Walk and Arrive at the Answer: Reasoning Over Paths in Knowledge Bases using Reinforcement Learning},
-  author    = {Das, Rajarshi and Dhuliawala, Shehzaad and Zaheer, Manzil and Vilnis, Luke and Durugkar, Ishan and Krishnamurthy, Akshay and Smola, Alex and McCallum, Andrew},
-  booktitle = {ICLR},
-  year      = {2018}
-}
-~~~
+Citation and identifying project information are intentionally omitted from this branch during blind evaluation.
 
 ## License
 
