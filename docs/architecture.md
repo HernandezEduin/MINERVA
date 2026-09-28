@@ -49,7 +49,7 @@ Recurrent path state   │
 
 ## Question representation
 
-<code>code/data/embedding_server.py</code> provides transformer-based question representations outside the TensorFlow 1-style graph used by the MINERVA implementation. This avoids placing the Hugging Face encoder directly inside the legacy TensorFlow execution graph.
+<code>code/data/embedding_server.py</code> provides transformer-based question representations outside the TensorFlow 1-style graph used by the MINERVA implementation. This avoids placing the transformer encoder directly inside the legacy TensorFlow execution graph.
 
 The question representation is projected into the policy space. The current code supports configurable projection adapters, including linear, MLP, and residual variants.
 
