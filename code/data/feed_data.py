@@ -116,8 +116,8 @@ class QuestionBatcher:
             raise ValueError("Paraphrased questions are requested but not available in the dataset.")
         if evaluate_paraphrases and self.train_metadata.get("question_paraphrased_column") is None:
             raise ValueError("Paraphrased questions are requested but not available in the dataset.")
-        if question_format == 'relation_only' and not(self.path_exists):
-            raise ValueError("Relation-only format is requested but no path information is available in the dataset.")
+        if question_format == 'relation_only' and not (self.path_exists or self.path_key_exists):
+            raise ValueError("Relation-only format is requested but no path/path-key information is available in the dataset.")
 
 
         if evaluate_paraphrases:
@@ -291,6 +291,57 @@ class QuestionBatcher:
         """
         return self.path_key_exists
 
+    def _relation_only_questions(
+        self,
+        paths: Optional[List],
+        path_keys: Optional[List],
+    ) -> List[List[int]]:
+        """Build relation-only question tokens for legacy and multi-reference schemas.
+
+        Single-reference datasets provide one Path-Key relation sequence per question.
+        Multi-reference datasets may provide multiple valid relation chains. Relation-only mode
+        is inherently single-input, so the first released chain is selected
+        deterministically; full-text training/evaluation is unaffected.
+
+        Args:
+            paths: List of paths for each question, where each path is a list of triples
+            path_keys: List of path keys for each question, where each path key is a list of relations
+        Returns:
+            List of tokenized relation-only questions, where each question is a list of token IDs
+        """
+        relations_only: List[str] = []
+
+        row_count = len(path_keys) if path_keys is not None else len(paths)
+        for i in range(row_count):
+            rel_seq = None
+
+            if path_keys is not None:
+                value = path_keys[i]
+                if isinstance(value, list) and value:
+                    rel_seq = value[0] if isinstance(value[0], list) else value
+
+            if rel_seq is None and paths is not None:
+                value = paths[i]
+                if isinstance(value, list) and value:
+                    if (
+                        isinstance(value[0], list)
+                        and len(value[0]) == 3
+                        and not isinstance(value[0][0], list)
+                    ):
+                        path = value
+                    else:
+                        path = value[0]
+                    rel_seq = [triple[1] for triple in path]
+
+            if rel_seq is None:
+                raise ValueError("Unable to construct relation-only input for a QA row.")
+
+            relations_only.append(
+                " ".join([f"[{rel}]" for rel in self.translate_relations(rel_seq)])
+            )
+
+        return self.tokenize_questions(relations_only)
+
     def yield_next_batch_train(self) -> Generator[Tuple[List[str], Union[np.ndarray, List[List[int]]], np.ndarray, np.ndarray], None, None]:
         """
         Generate infinite training batches with random sampling.
@@ -333,12 +384,7 @@ class QuestionBatcher:
                 questions: List[List[int]] = batch['Question-Paraphrased'] # pandas dataframe where each entry is a list of list of token ids, randomly select one paraphrase for each question
                 questions = [q[np.random.randint(0, len(q))] if isinstance(q, list) and len(q) > 0 else [] for q in questions] # handle empty paraphrase lists
             elif self.question_format == 'relation_only':
-                # extract relation sequences
-                relations_only: List[str] = []
-                for path in paths:
-                    rel_seq = [triple[1] for triple in path]
-                    relations_only.append(" ".join([f"[{rel}]" for rel in self.translate_relations(rel_seq)]))
-                questions: List[List[int]] = self.tokenize_questions(relations_only)
+                questions: List[List[int]] = self._relation_only_questions(paths, path_keys)
             else:  # 'graph_only'
                 # add empty questions and 0 vector embeddings
                 questions: List[List[int]] = self.tokenize_questions([""] * len(batch)) 
@@ -402,12 +448,7 @@ class QuestionBatcher:
                 # NOTE: For evaluate_paraphrases, each paraphrased questions are copied to the 'Question' column so each are evaluated independently.
                 questions: List[List[int]] = batch['Question'].tolist() # already tokenized
             elif self.question_format == 'relation_only':
-                # extract relation sequences
-                relations_only: List[str] = []
-                for path in paths:
-                    rel_seq = [triple[1] for triple in path]
-                    relations_only.append(" ".join([f"[{rel}]" for rel in self.translate_relations(rel_seq)]))
-                questions: List[List[int]] = self.tokenize_questions(relations_only)
+                questions: List[List[int]] = self._relation_only_questions(paths, path_keys)
             else:  # 'graph_only'
                 # add empty questions and 0 vector embeddings
                 questions: List[List[int]] = self.tokenize_questions([""] * len(batch)) 

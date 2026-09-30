@@ -473,57 +473,169 @@ class EpisodeNLQ(object):
 
     # 6) Path utilities & normalization
     # 6-a) Path access
+    @staticmethod
+    def _is_encoded_edge(value: Any) -> bool:
+        """
+        Check if a value is an encoded (head, relation, tail) edge.
+
+        An encoded edge is represented as a list, tuple, or numpy array of length 3,
+        where each element is not a nested list, tuple, or dictionary.
+
+        Args:
+            value: The value to check for encoded edge structure.
+        Returns:
+            True if the value is an encoded edge, False otherwise.
+        """
+        return (
+            isinstance(value, (list, tuple, np.ndarray))
+            and len(value) == 3
+            and not any(isinstance(x, (list, tuple, np.ndarray, dict)) for x in value)
+        )
+
+    def get_paths(self, idx: int) -> List[List[Tuple[int, int, int]]]:
+        """
+        Get all the annotated reference paths for a given question index.
+
+        Legacy datasets store a single path per row. New format stores a list of
+        valid reference paths. Both representations are normalized here.
+
+        Args:
+            idx: Index of the question in the batch (0 <= idx < batch_size)
+        Returns:
+            List of reference paths, where each path is a list of edges (head, relation, tail).
+            If no paths are available, returns an empty list.
+        """
+        if not self.paths_exists:
+            return []
+
+        # Normalize the raw path data to a list of reference paths
+        raw = self.paths[idx]
+        if isinstance(raw, np.ndarray):
+            raw = raw.tolist()
+        if not isinstance(raw, (list, tuple)) or len(raw) == 0:
+            return []
+
+        # If the first element is an encoded edge, treat the entire raw data as a single path
+        if self._is_encoded_edge(raw[0]):
+            return [[tuple(int(x) for x in edge) for edge in raw]]
+
+        # If the first element is a list/tuple of edges, treat each as a separate reference path
+        refs: List[List[Tuple[int, int, int]]] = []
+        for path in raw:
+            if isinstance(path, np.ndarray):
+                path = path.tolist()
+            if (
+                isinstance(path, (list, tuple))
+                and len(path) > 0
+                and self._is_encoded_edge(path[0])
+            ):
+                refs.append([tuple(int(x) for x in edge) for edge in path])
+        return refs
+
     def get_path(self, idx: int) -> Optional[List[Tuple[int, int, int]]]:
         """
-        Get the ground-truth path for a given question index.
+        Get a single ground-truth path for a given question index.
 
+        Args:
+            idx: Index of the question in the batch (0 <= idx < batch_size)
         Returns:
-            A list of edges for the question, where each edge is a tuple (head, relation, tail)
-            using integer IDs; or None if ground-truth paths are not available.
+            The first reference path as a list of edges (head, relation, tail), or None if no paths are available.
         """
-        if self.paths_exists:
-            return self.paths[idx]
-        else:
-            return None
+        paths = self.get_paths(idx)
+        return paths[0] if paths else None
+
+    def get_path_keys(self, idx: int) -> List[List[int]]:
+        """
+        Get all released reference relation chains for one question.
+
+        Args:
+            idx: Index of the question in the batch (0 <= idx < batch_size)
+        Returns:
+            List of relation chains, where each chain is a list of relation IDs.
+            If no path keys are available, returns an empty list.
+        """
+        if not self.path_key_exists:
+            return []
+
+        raw = self.path_keys[idx]
+        if isinstance(raw, np.ndarray):
+            raw = raw.tolist()
+        if not isinstance(raw, (list, tuple)) or len(raw) == 0:
+            return []
+
+        if isinstance(raw[0], (list, tuple, np.ndarray)):
+            return [[int(r) for r in chain] for chain in raw]
+        return [[int(r) for r in raw]]
+
+    def get_path_key(self, idx: int) -> Optional[List[int]]:
+        """
+        Get a single released reference relation chain for one question.
+        
+        Args:
+            idx: Index of the question in the batch (0 <= idx < batch_size)
+        Returns:
+            The first relation chain as a list of relation IDs, or None if no path keys are available.
+        """
+        keys = self.get_path_keys(idx)
+        return keys[0] if keys else None
+
+    def get_reference_relation_chains(self, idx: int) -> List[List[int]]:
+        """
+        Return all released relation references for fidelity metrics.
+
+        Args:
+            idx: Index of the question in the batch (0 <= idx < batch_size)
+        Returns:
+            List of relation chains, where each chain is a list of relation IDs.
+            If no path keys are available, returns an empty list.
+        """
+        keys = self.get_path_keys(idx)
+        if keys:
+            return keys
+        return [[int(r) for _, r, _ in path] for path in self.get_paths(idx)]
 
     def get_path_length(self, idx: int) -> int:
         """
-        Get the length of the ground-truth path for a given question index.
+        Get the length of the ground-truth path for a given question index. 
+        If no path is available, returns 0.
+
+        If multiple paths are available, returns the length of the first path. If no paths are available, returns 0.
 
         Returns:
             The number of edges in the ground-truth path for the question; or 0 if paths are not available.
         """
         if self.path_hops is not None:
             return self.path_hops[idx]
-        elif self.paths_exists:
-            return len(self.paths[idx])
-        elif self.path_key_exists:
-            return len(self.path_keys[idx])
-        else:
-            return 0
-        
-    def get_path_key(self, idx: int) -> Optional[List[int]]:
+
+        paths = self.get_paths(idx)
+        if paths:
+            return len(paths[0])
+
+        keys = self.get_path_keys(idx)
+        if keys:
+            return len(keys[0])
+
+        return 0
+
+    def get_reconstructed_reference_paths(self, idx: int) -> List[List[Tuple[int, int, int]]]:
         """
-        Get the path key (e.g., relation sequence) for a given question index.
+        Reconstruct all answer-consistent entity-level reference paths.
+
+        For every annotated relation chain associated with the question, enumerate
+        all paths in the active evaluator KG that:
+
+        1. start at the question's source entity;
+        2. follow the relation chain exactly; and
+        3. terminate at one of the released valid answer entities.
+
+        Duplicate entity-level paths are removed across relation chains.
+
+        Results are cached per question because reconstruction may be used by
+        multiple path-fidelity metrics during the same evaluation.
 
         Returns:
-            A list of integers representing the path key for the question; or None if path keys are not available.
-        """
-        if self.path_key_exists:
-            return self.path_keys[idx]
-        else:
-            return None
-    
-    def get_semantically_valid_paths_from_relation_chain(self, idx: int) -> List[List[Tuple[int, int, int]]]:
-        """
-        Build all entity-level paths that follow the annotated relation chain and end
-        in a valid answer for a multi-answer question.
-
-        This is intended for test-only multi-answer path-fidelity evaluation when
-        the dataset has Path-Key relation chains but no entity-level Paths column.
-        The graph-level traversal is delegated to ``RelationEntityGrapher``; its
-        untruncated relation adjacency is created lazily only when this method is
-        actually called.
+            List of unique reconstructed entity-level paths. Returns an empty list
+            if no annotated relation chain produces an answer-consistent path.
         """
         assert self.mode == "test", "Semantic valid path expansion is only used for test evaluation."
         assert self.multi_answers, "Semantic valid path expansion is only defined for multi-answer questions."
@@ -532,19 +644,27 @@ class EpisodeNLQ(object):
         if idx in self._semantic_valid_path_cache:
             return self._semantic_valid_path_cache[idx]
 
-        relation_chain = [int(r) for r in self.path_keys[idx]]
-        if len(relation_chain) == 0:
+        relation_chains = self.get_path_keys(idx)
+        if not relation_chains:
             self._semantic_valid_path_cache[idx] = []
             return []
 
         start_entity = int(self.start_entities[idx * self.num_rollouts])
         valid_answers = set(int(e) for e in self.end_entities[idx])
 
-        valid_paths = self.grapher.find_paths_by_relation_chain(
-            start_entity=start_entity,
-            relation_chain=relation_chain,
-            target_entities=valid_answers,
-        )
+        valid_paths: List[List[Tuple[int, int, int]]] = []
+        seen = set()
+        for relation_chain in relation_chains:
+            # iterate over all relation chains and find all entity-level paths that follow the chain and end in a valid answer
+            for path in self.grapher.find_paths_by_relation_chain(
+                start_entity=start_entity,
+                relation_chain=relation_chain,
+                target_entities=valid_answers,
+            ):
+                key = tuple(tuple(int(x) for x in edge) for edge in path)
+                if key not in seen:
+                    seen.add(key)
+                    valid_paths.append(path)
 
         self._semantic_valid_path_cache[idx] = valid_paths
         return valid_paths
@@ -699,79 +819,144 @@ class EpisodeNLQ(object):
     # 7-b) Path similarity metrics
     def get_subgraph_overlap(self, pred_path: List[List[int]], idx: int) -> Tuple[float, float, float]:
         """
-        {F1, Precision, Recall}_SG: Subgraph overlap between predicted and ground-truth paths.
-        
-        Calculate permutation-invariant edge-set overlap between predicted and ground-truth paths.
+        F1_SG: Best-reference subgraph overlap against released reference paths.
 
-        Edges are compared as sets (order and multiplicity do not matter). Special tokens
-        (e.g., NO_OP, STOP, RESTART) are ignored.
+        Computes permutation-invariant edge-set overlap between the predicted path
+        and every released entity-level reference path for the question. This
+        supports both the single-Path representation and the multi-reference 
+        representation.
+
+        Predicted special actions (e.g., NO_OP, STOP, RESTART) are removed before
+        evaluation, and inverse relations are canonicalized to their corresponding
+        forward KG edges.
+
+        For a question with released reference-path set R(q):
+
+            F1_SG(q) = max_{P* in R(q)} F1_SG(P_pred(q), P*)
+
+        The returned precision, recall, and F1 values are those of the reference
+        path that maximizes F1.
 
         Args:
-            pred_path: Sequence of edges (h, r, t) using integer IDs (may include special tokens).
-            idx: Question index into the ground-truth path list.
+            pred_path:
+                Predicted sequence of edges (head, relation, tail), using integer
+                IDs. The path may contain special actions.
+            idx:
+                Question index used to retrieve the released reference paths.
 
         Returns:
-            precision: Fraction of predicted edges that appear in the ground-truth path.
-            recall: Fraction of ground-truth edges recovered by the predicted path.
-            f1_score: Harmonic mean of precision and recall.
+            Tuple[float, float, float]:
+                Precision, recall, and F1 for the best-matching released reference
+                path.
 
         Note:
-            DO NOT USE AS A REWARD SIGNAL.
+            Edge order and multiplicity are ignored by this metric.
+            Do not use this metric as a reward signal.
         """
-        assert self.paths_exists, "No ground-truth paths available for faithfulness evaluation!"
-        gt_path = self.paths[idx]
+        gt_paths = self.get_paths(idx)
+        assert gt_paths, "No ground-truth paths available for faithfulness evaluation!"
 
         # convert to a set of edges for easier comparison, edge-based
         pred_edges = set(
             self.canon_edge(h, r, t)  # map inverse tokens back to their original relation for evaluation purposes (e.g. _relation -> relation)
-            for h, r, t in pred_path 
+            for h, r, t in pred_path
             if r not in self.special_tokens   #   remove cycles and stop/restart signals
         )
-        gt_edges = set((h, r, t) for h, r, t in gt_path)
 
-        return compute_precision_recall_f1(pred_edges, gt_edges)
+        # Amongst all released reference paths, find the one that maximizes F1_SG with the predicted path
+        best: Optional[Tuple[float, float, float]] = None
+        for gt_path in gt_paths:
+            gt_edges = set((h, r, t) for h, r, t in gt_path)
+            scores = compute_precision_recall_f1(pred_edges, gt_edges)
+            if best is None or scores[2] > best[2]:
+                best = scores
+
+        return best if best is not None else (0.0, 0.0, 0.0)
 
     def get_path_edit_distance(self, pred_path: List[List[int]], idx: int) -> float:
         """
-        PED: Path Edit Distance.
+        PED: Best-reference Path Edit Distance against released reference paths.
 
-        Compute edit distance between predicted and ground-truth paths.
+        Computes edge-sequence edit distance between the predicted path and every
+        released entity-level reference path for the question. This supports both
+        the single-Path representation and the multi-reference representation.
 
-        Edit distance is computed via dynamic programming over the edge sequences after filtering
-        special tokens (NO_OP/STOP/RESTART).
+        Predicted special actions (e.g., NO_OP, STOP, RESTART) are removed before
+        evaluation, and inverse relations are canonicalized to their corresponding
+        forward KG edges.
+
+        For a question with released reference-path set R(q):
+
+            PED(q) = min_{P* in R(q)} PED(P_pred(q), P*)
 
         Args:
-            pred_path: Sequence of edges (h, r, t) using integer IDs (may include special tokens).
-            idx: Question index into the ground-truth path list.
+            pred_path:
+                Predicted sequence of edges (head, relation, tail), using integer
+                IDs. The path may contain special actions.
+            idx:
+                Question index used to retrieve the released reference paths.
 
         Returns:
-            edit_distance (float): Edit distance between predicted and ground-truth path sequences.
+            float:
+                Minimum edit distance between the predicted path and any released
+                reference path.
 
         Note:
-            - Stricter than set-based overlap because order matters.
-            - Intended for analysis; typically too strict/sparse for reward shaping.
+            Unlike F1_SG, PED is sequence-sensitive and therefore accounts for
+            edge order and multiplicity.
+            Intended for evaluation/analysis rather than reward shaping.
         """
-        assert self.paths_exists, "No ground-truth paths available for edit distance evaluation!"
-        gt_path = self.paths[idx]
+        gt_paths = self.get_paths(idx)
+        assert gt_paths, "No ground-truth paths available for edit distance evaluation!"
 
         # Filter out no-op, restart, and stop signals from both paths
-        pred_path = [self.canon_edge(h, r, t) for h, r, t in pred_path if r not in self.special_tokens]
-        gt_path = [(h, r, t) for h, r, t in gt_path]
+        pred_clean = [
+            self.canon_edge(h, r, t)
+            for h, r, t in pred_path
+            if r not in self.special_tokens
+        ]
 
-        ed_dist, m, n = edit_distance(pred_path, gt_path)
-        return ed_dist
+        return float(min(
+            edit_distance(pred_clean, [(h, r, t) for h, r, t in gt_path])[0]
+            for gt_path in gt_paths
+        ))
 
-    def get_multi_answer_path_edit_distance(self, pred_path: List[List[int]], idx: int) -> Optional[float]:
+    def get_reconstructed_path_edit_distance(self, pred_path: List[List[int]], idx: int) -> Optional[float]:
         """
-        Multi-answer PED against all semantically valid paths G(q).
+        PED against graph-reconstructed reference paths.
 
-        PED_multi(q) = min_{P* in G(q)} PED(P_pred(q), P*)
+        Used when released entity-level reference paths are unavailable but one or
+        more annotated relation chains are available.
 
-        G(q) is generated on the fly from the question's Path-Key relation chain,
-        starting entity, valid answer set, and the current directed evaluator KG.
-        Returns None if no semantic valid path can be generated.
+        Reference paths are reconstructed on demand by starting from the question's
+        source entity, following each released Path-Key relation chain in the
+        active evaluator KG, and retaining only paths whose terminal entity belongs
+        to the released valid-answer set.
+
+        Let G(q) denote the resulting set of reconstructed entity-level paths:
+
+            PED_reconstructed(q)
+                = min_{P* in G(q)} PED(P_pred(q), P*)
+
+        This is currently used primarily for multi-answer datasets such as
+        MQuAKE-ST MA, but the reconstruction procedure itself supports multiple
+        relation chains and is not conceptually tied to answer cardinality.
+
+        Args:
+            pred_path:
+                Predicted sequence of edges (head, relation, tail), using integer
+                IDs.
+            idx:
+                Question index used to retrieve the source entity, answer set, and
+                annotated relation chain(s).
+
+        Returns:
+            Optional[float]:
+                Minimum edit distance to any reconstructed valid reference path, or
+                None if no valid reference path can be reconstructed in the active
+                graph.
         """
-        valid_paths = self.get_semantically_valid_paths_from_relation_chain(idx)
+        valid_paths = self.get_reconstructed_reference_paths(idx)
         if not valid_paths:
             return None
 
@@ -782,16 +967,45 @@ class EpisodeNLQ(object):
             distances.append(ed_dist)
         return float(min(distances))
 
-    def get_multi_answer_subgraph_overlap(self, pred_path: List[List[int]], idx: int) -> Optional[Tuple[float, float, float]]:
+    def get_reconstructed_subgraph_overlap(self, pred_path: List[List[int]], idx: int) -> Optional[Tuple[float, float, float]]:
         """
-        Multi-answer F1_SG against all semantically valid paths G(q).
+        F1_SG against graph-reconstructed reference paths.
 
-        F1_SG_multi(q) = max_{P* in G(q)} F1_SG(P_pred(q), P*)
+        Used when released entity-level reference paths are unavailable but one or
+        more annotated relation chains are available.
 
-        The returned precision/recall/F1 tuple corresponds to the reference path
-        that maximizes F1. Returns None if no semantic valid path can be generated.
+        Reference paths are reconstructed on demand by starting from the question's
+        source entity, following each released Path-Key relation chain in the
+        active evaluator KG, and retaining only paths whose terminal entity belongs
+        to the released valid-answer set.
+
+        Let G(q) denote the resulting set of reconstructed entity-level paths:
+
+            F1_SG_reconstructed(q)
+                = max_{P* in G(q)} F1_SG(P_pred(q), P*)
+
+        The returned precision, recall, and F1 values correspond to the
+        reconstructed reference path that maximizes F1.
+
+        This is currently used primarily for multi-answer datasets such as
+        MQuAKE-ST MA, but the reconstruction procedure itself supports multiple
+        relation chains and is not conceptually tied to answer cardinality.
+
+        Args:
+            pred_path:
+                Predicted sequence of edges (head, relation, tail), using integer
+                IDs.
+            idx:
+                Question index used to retrieve the source entity, answer set, and
+                annotated relation chain(s).
+
+        Returns:
+            Optional[Tuple[float, float, float]]:
+                Precision, recall, and F1 for the best-matching reconstructed
+                reference path, or None if no valid reference path can be
+                reconstructed in the active graph.
         """
-        valid_paths = self.get_semantically_valid_paths_from_relation_chain(idx)
+        valid_paths = self.get_reconstructed_reference_paths(idx)
         if not valid_paths:
             return None
 
@@ -809,90 +1023,162 @@ class EpisodeNLQ(object):
                 best = scores
         return best
 
-    def get_relation_edit_distance(self, pred_rels: List[List[int]], idx: int) -> float:
+    def get_relation_edit_distance(self, pred_rels: List[int], idx: int) -> float:
         """
-        RED: Relation Edit Distance.
+        RED: Best-reference Relation Edit Distance.
 
-        Compute edit distance between predicted and ground-truth relation sequences.
+        Computes sequence edit distance between the predicted relation sequence and
+        every released reference relation chain for the question.
 
-        Edit distance is computed via dynamic programming over the edge sequences after filtering
-        special tokens (NO_OP/STOP/RESTART).
+        Released relation chains may come directly from Path-Key or Multi-Paths-Key,
+        or may be derived from released entity-level reference paths when explicit
+        path keys are unavailable.
+
+        Predicted special actions (e.g., NO_OP, STOP, RESTART) are removed before
+        evaluation, and inverse relation tokens are canonicalized to their
+        corresponding forward relations.
+
+        For a question with released relation-chain set R_rel(q):
+
+            RED(q)
+                = min_{R* in R_rel(q)}
+                    RED(R_pred(q), R*)
 
         Args:
-            pred_rels: List of predicted relation IDs.
-            idx: Question index into the ground-truth path list.
+            pred_rels:
+                Predicted sequence of relation IDs. The sequence may contain
+                special navigation actions.
+            idx:
+                Question index used to retrieve the released reference relation
+                chains.
 
         Returns:
-            edit_distance (float): Edit distance between predicted and ground-truth relation sequences.
+            float:
+                Minimum relation edit distance between the predicted sequence and
+                any released reference relation chain.
 
         Note:
-            - Stricter than set-based overlap because order matters.
-            - Intended for analysis; typically too strict/sparse for reward shaping.
+            RED is sequence-sensitive and therefore accounts for relation order and
+            multiplicity. It is intended for evaluation and analysis rather than
+            reward shaping.
         """
-        assert self.paths_exists or self.path_key_exists, "No ground-truth paths available for edit distance evaluation!"
-        gt_path = self.paths[idx] if self.paths_exists else self.path_keys[idx]
+        gt_chains = self.get_reference_relation_chains(idx)
+        assert gt_chains, "No ground-truth relation chains available for edit distance evaluation!"
 
         # Filter out no-op, restart, and stop signals from both paths
-        pred_rels = [self.canon_rel(r) for r in pred_rels if r not in self.special_tokens]
-        gt_rels = [r for _, r, _ in gt_path] if self.paths_exists else gt_path
-
-        ed_dist, m, n = edit_distance(pred_rels, gt_rels)
-        return ed_dist
+        pred_clean = [
+            self.canon_rel(r)
+            for r in pred_rels
+            if r not in self.special_tokens
+        ]
+        return float(min(edit_distance(pred_clean, gt_rels)[0] for gt_rels in gt_chains))
 
     # 7-c) Coverage metrics
     def get_node_coverage(self, pred_entities: List[int], idx: int) -> Tuple[float, float, float]:
         """
-        Compute permutation-invariant node coverage between predicted nodes and ground-truth path nodes.
+        Best-reference node-set overlap against released reference paths.
+
+        Computes permutation-invariant node-set overlap between the entities visited
+        by the predicted trajectory and every released entity-level reference path
+        for the question.
+
+        For each reference path, the ground-truth node set contains every head and
+        tail entity appearing in that path. Duplicate visits and node order are
+        ignored.
+
+        For a question with released reference-path set R(q), the reference path
+        maximizing node-set F1 is selected:
+
+            F1_NODE(q)
+                = max_{P* in R(q)}
+                    F1_NODE(P_pred(q), P*)
+
+        The returned precision, recall, and F1 values all correspond to that same
+        best-matching reference path.
 
         Args:
-            pred_entities: List of visited entity IDs (duplicates allowed; evaluated as a set).
-            idx: Question index into the ground-truth path list.
+            pred_entities:
+                Entity IDs visited by the predicted trajectory. Duplicate entities
+                are allowed but are evaluated as a set.
+            idx:
+                Question index used to retrieve the released entity-level
+                reference paths.
 
         Returns:
-            precision: Fraction of predicted nodes that are in the ground-truth node set.
-            recall: Fraction of ground-truth nodes that are present in the predicted node set.
-            f1_score: Harmonic mean of precision and recall.
+            Tuple[float, float, float]:
+                Precision, recall, and F1 for the best-matching released reference
+                path.
 
         Note:
-            - Ground-truth node set includes both heads and tails from the ground-truth path.
+            This metric is permutation-invariant: node order and multiplicity are
+            ignored.
         """
-        assert self.paths_exists, "No ground-truth paths available for faithfulness evaluation!"
-        gt_path = self.paths[idx]
+        gt_paths = self.get_paths(idx)
+        assert gt_paths, "No ground-truth paths available for faithfulness evaluation!"
 
         pred_nodes = set(pred_entities)
-        gt_nodes = set(t for _, _, t in gt_path) | set(h for h, _, _ in gt_path)  # include start entity from gt path
+        best: Optional[Tuple[float, float, float]] = None
+        for gt_path in gt_paths:
+            gt_nodes = set(t for _, _, t in gt_path) | set(h for h, _, _ in gt_path)
+            scores = compute_precision_recall_f1(pred_nodes, gt_nodes)
+            if best is None or scores[2] > best[2]:
+                best = scores
 
-        return compute_precision_recall_f1(pred_nodes, gt_nodes)
+        return best if best is not None else (0.0, 0.0, 0.0)
 
     def get_relation_coverage(self, pred_relations: List[int], idx: int) -> Tuple[float, float, float]:
         """
-        {F1, Precision, Recall}_REL: Relation coverage metric.
+        F1_REL: Best-reference relation-set overlap.
 
-        Compute permutation-invariant relation coverage between predicted and ground-truth relations.
+        Computes permutation-invariant relation-set overlap between the predicted
+        trajectory and every released reference relation chain for the question.
 
-        Predicted relations are evaluated as a set. Inverse relation tokens are mapped back to their
-        original relation IDs for evaluation, and special tokens (NO_OP/STOP/RESTART) are ignored.
+        Predicted special actions (e.g., NO_OP, STOP, RESTART) are removed before
+        evaluation, and inverse relation tokens are canonicalized to their
+        corresponding forward relations.
+
+        For a question with released relation-chain set R_rel(q):
+
+            F1_REL(q)
+                = max_{R* in R_rel(q)}
+                    F1_REL(R_pred(q), R*)
+
+        The returned precision, recall, and F1 values correspond to the same
+        reference relation chain that maximizes F1.
 
         Args:
-            pred_relations: List of relation IDs used in the predicted rollout (duplicates allowed).
-            idx: Question index into the ground-truth path list.
+            pred_relations:
+                Relation IDs used by the predicted trajectory. Duplicate relations
+                are allowed but are evaluated as a set.
+            idx:
+                Question index used to retrieve the released reference relation
+                chains.
 
         Returns:
-            precision: Fraction of predicted relations that appear in the ground-truth relation set.
-            recall: Fraction of ground-truth relations recovered by the predicted relation set.
-            f1_score: Harmonic mean of precision and recall.
+            Tuple[float, float, float]:
+                Precision, recall, and F1 for the best-matching released reference
+                relation chain.
+
+        Note:
+            This metric ignores relation order and multiplicity. RED should be used
+            when sequence order is important.
         """
-        assert self.paths_exists or self.path_key_exists, "No ground-truth paths available for faithfulness evaluation!"
-        gt_path = self.paths[idx] if self.paths_exists else self.path_keys[idx]
+        gt_chains = self.get_reference_relation_chains(idx)
+        assert gt_chains, "No ground-truth relation chains available for faithfulness evaluation!"
 
         pred_rels = set(
-            self.grapher.inverse_mapping.get(r, r)      # map inverse tokens back to their original relation for evaluation purposes (e.g. _relation -> relation)
+            self.grapher.inverse_mapping.get(r, r)      # map inverse tokens back to their original relation
             for r in pred_relations
-            if r not in self.special_tokens               #   remove cycles and stop/restart signals
+            if r not in self.special_tokens             #   remove cycles and stop/restart signals
         )
-        gt_rels = set(r for _, r, _ in gt_path) if self.paths_exists else set(gt_path)  # if using path keys, gt_path is already a list of relations
 
-        return compute_precision_recall_f1(pred_rels, gt_rels)
+        best: Optional[Tuple[float, float, float]] = None
+        for gt_chain in gt_chains:
+            scores = compute_precision_recall_f1(pred_rels, set(gt_chain))
+            if best is None or scores[2] > best[2]:
+                best = scores
+
+        return best if best is not None else (0.0, 0.0, 0.0)
 
     # 7-d) High-level analysis
     def get_reasoning_diagnostic(self, pred_path: List[List[int]]) -> Tuple[float, float, float, float, float, float, float]:

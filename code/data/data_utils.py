@@ -41,6 +41,8 @@ from code.data.setup import get_git_root
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+QA_CACHE_SCHEMA_VERSION = 2
+
 def load_json(file_path: str) -> Dict[str, Any]:
     """
     Load JSON data from a file.
@@ -105,14 +107,242 @@ def extract_literals(column: Union[str, pd.Series], flatten: bool = False) -> Un
         
     return evaluated_column
 
+def _is_triplet_like(value: Any) -> bool:
+    """
+    Check whether a value has the structure of one graph edge triplet.
+
+    A triplet is expected to be a flat three-element sequence representing:
+
+        [head, relation, tail]
+
+    The outer container may be a list or tuple. Each of the three elements
+    must be scalar-like with respect to the path representation; nested lists,
+    tuples, or dictionaries are therefore rejected.
+
+    This helper is used only to identify the nesting level of path annotations.
+    It does not verify that the head, relation, and tail values exist in the
+    knowledge graph or correspond to valid entity/relation identifiers.
+
+    Args:
+        value:
+            Object to inspect.
+
+    Returns:
+        bool:
+            True if ``value`` structurally resembles one
+            ``[head, relation, tail]`` graph edge; otherwise False.
+    """
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 3
+        and not any(isinstance(x, (list, tuple, dict)) for x in value)
+    )
+
+
+def _is_path_like(value: Any) -> bool:
+    """
+    Check whether a value has the structure of one entity-level graph path.
+
+    An entity-level path is represented as a non-empty sequence of graph-edge
+    triplets:
+
+        [
+            [head_1, relation_1, tail_1],
+            [head_2, relation_2, tail_2],
+            ...
+        ]
+
+    Every element must satisfy ``_is_triplet_like``. This function checks only
+    the structural nesting of the annotation. It does not verify path
+    continuity, relation validity, endpoint correctness, or membership in the
+    active knowledge graph.
+
+    Args:
+        value:
+            Object to inspect.
+
+    Returns:
+        bool:
+            True if ``value`` structurally resembles one entity-level path;
+            otherwise False.
+    """
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) > 0
+        and all(_is_triplet_like(edge) for edge in value)
+    )
+
+
+def _flatten_reference_paths(value: Any) -> List[List[List[Any]]]:
+    """
+    Flatten grouped multi-annotated reference paths into individual paths.
+
+    Multi-annotated reference datasets may organize ``Multi-Paths`` using
+    additional grouping levels, for example:
+
+        relation-chain group
+            -> entity-level reference path
+                -> [head, relation, tail] triplets
+
+    Conceptually, an annotation may therefore look like:
+
+        [
+            [path_A1, path_A2],
+            [path_B1],
+        ]
+
+    where the outer groups correspond to different annotated relation chains.
+
+    MINERVA's best-reference entity-level fidelity metrics require the complete
+    collection of valid reference paths rather than the grouping itself. This
+    helper recursively traverses the nested annotation and returns:
+
+        [
+            path_A1,
+            path_A2,
+            path_B1,
+        ]
+
+    Each detected path is preserved intact; only the higher-level grouping is
+    removed. Triplets within a path are not flattened or reordered.
+
+    The function performs structural normalization only. It does not validate
+    path continuity, remove duplicate paths, check endpoints, or confirm that
+    the annotated edges occur in the active knowledge graph.
+
+    Args:
+        value:
+            Parsed ``Multi-Paths`` annotation. The value may contain one or
+            more nested list/tuple levels above the entity-level paths.
+
+    Returns:
+        List[List[List[Any]]]:
+            Flat list of entity-level reference paths. Each path is a list of
+            ``[head, relation, tail]`` triplets.
+
+    Note:
+        The association between a reference path and its original
+        relation-chain group is intentionally discarded. Relation-chain
+        annotations are retained separately through ``Multi-Paths-Key``.
+    """
+    paths: List[List[List[Any]]] = []
+
+    def visit(obj: Any) -> None:
+        if _is_path_like(obj):
+            paths.append([list(edge) for edge in obj])
+            return
+        if isinstance(obj, (list, tuple)):
+            for child in obj:
+                visit(child)
+
+    visit(value)
+    return paths
+
+
+def _normalize_multi_path_keys(value: Any) -> List[str]:
+    """
+    Normalize multi-annotated relation-chain keys to a list of strings.
+
+    ``Multi-Paths-Key`` may represent either a single annotated relation chain:
+
+        "relation_a->relation_b"
+
+    or multiple annotated chains:
+
+        [
+            "relation_a->relation_b",
+            "relation_c->relation_d",
+        ]
+
+    This helper normalizes both cases to:
+
+        List[str]
+
+    so downstream preprocessing can uniformly map every relation chain to its
+    sequence of relation IDs.
+
+    The relation-chain strings themselves are not parsed or validated here.
+    Splitting on ``->`` and mapping relation names to vocabulary IDs is handled
+    later in preprocessing.
+
+    Args:
+        value:
+            A single relation-chain string or a list/tuple of relation-chain
+            values.
+
+    Returns:
+        List[str]:
+            One string for each annotated relation chain.
+
+    Raises:
+        TypeError:
+            If ``value`` is neither a string nor a list/tuple.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(key) for key in value]
+    raise TypeError(f"Unsupported Multi-Paths-Key value: {type(value)!r}")
+
+
 def paraphrase2question(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Expand paraphrased questions into individual rows.
+    Expand grouped question paraphrases into individual evaluation instances.
 
-    For each row:
-    - each paraphrase becomes its own row
-    - all other columns are copied
-    - 'Question' is replaced by the paraphrased question
+    Some QA datasets store multiple surface realizations of the same underlying
+    question in a ``Question-Paraphrased`` column. This function converts that
+    grouped representation into one DataFrame row per surface form.
+
+    For each input row:
+
+      1. ``Question-Paraphrased`` is expected to contain a list of question
+         strings.
+      2. Each listed paraphrase becomes its own output row.
+      3. All other columns are copied unchanged, preserving information such
+         as source entity, answers, path annotations, family identifiers,
+         hop count, and split assignment.
+      4. The ``Question`` column is replaced by the selected paraphrase for
+         that output row.
+
+    For example:
+
+        Question = "Who is X?"
+        Question-Paraphrased = [
+            "Who is X?",
+            "What person is X?",
+            "Identify X."
+        ]
+
+    becomes three rows sharing the same structural QA annotations but having
+    different ``Question`` values.
+
+    If ``Question-Paraphrased`` is missing or invalid for an individual row,
+    that row falls back to a one-element list containing its original
+    ``Question`` value. The input DataFrame is not modified in place.
+
+    Args:
+        df:
+            QA DataFrame containing ``Question`` and
+            ``Question-Paraphrased`` columns.
+
+    Returns:
+        pd.DataFrame:
+            A new DataFrame containing one row per paraphrased question
+            instance. ``Question-Paraphrased`` is scalar after the explode
+            operation, while ``Question`` contains the corresponding surface
+            form.
+
+    Raises:
+        ValueError:
+            If the DataFrame does not contain a
+            ``Question-Paraphrased`` column.
+
+    Note:
+        The original canonical question is included as an output instance only
+        if it is already present in ``Question-Paraphrased`` or if the
+        paraphrase field is empty/invalid and the fallback is used. This
+        function does not automatically prepend the canonical question to a
+        valid paraphrase list.
     """
 
     paraphrase_col = "Question-Paraphrased"
@@ -210,12 +440,63 @@ def process_and_cache_triviaqa_data(
         csv_df["Answer"], flatten=False
     )
     
-    # Extract optional columns
+    # Extract optional columns. Multi-annotated reference datasets use Multi-Paths / 
+    # Multi-Paths-Key fields; single-reference datasets continue to use Paths / Path-Key.
     questions_paraphrased = extract_literals(csv_df["Question-Paraphrased"]) if 'Question-Paraphrased' in csv_df.columns else None
     questions_disambiguated = csv_df["Question-Disambiguated"] if 'Question-Disambiguated' in csv_df.columns else None
-    paths = extract_literals(csv_df["Paths"]) if 'Paths' in csv_df.columns else None
-    paths_label = csv_df["Paths-Label"] if 'Paths-Label' in csv_df.columns else None
-    path_keys = csv_df["Path-Key"] if 'Path-Key' in csv_df.columns else None
+
+    raw_paths_column = (
+        "Multi-Paths" if "Multi-Paths" in csv_df.columns
+        else "Paths" if "Paths" in csv_df.columns
+        else None
+    )
+    paths_are_multi_reference = raw_paths_column == "Multi-Paths"
+    if raw_paths_column == "Multi-Paths":
+        paths = extract_literals(csv_df[raw_paths_column]).map(_flatten_reference_paths)
+    elif raw_paths_column == "Paths":
+        paths = extract_literals(csv_df[raw_paths_column])
+    else:
+        paths = None
+
+    raw_paths_label_column = (
+        "Multi-Paths-Label" if "Multi-Paths-Label" in csv_df.columns
+        else "Paths-Label" if "Paths-Label" in csv_df.columns
+        else None
+    )
+    paths_label = (
+        csv_df[raw_paths_label_column].rename("Paths-Label")
+        if raw_paths_label_column is not None else None
+    )
+
+    raw_path_keys_column = (
+        "Multi-Paths-Key" if "Multi-Paths-Key" in csv_df.columns
+        else "Path-Key" if "Path-Key" in csv_df.columns
+        else None
+    )
+    path_keys_are_multi_reference = raw_path_keys_column == "Multi-Paths-Key"
+    if raw_path_keys_column == "Multi-Paths-Key":
+        path_keys = extract_literals(csv_df[raw_path_keys_column]).map(_normalize_multi_path_keys)
+    elif raw_path_keys_column == "Path-Key":
+        path_keys = csv_df[raw_path_keys_column]
+    else:
+        path_keys = None
+
+    question_family_id = csv_df["Question-Family-ID"] if "Question-Family-ID" in csv_df.columns else None
+    question_family_size = csv_df["Question-Family-Size"] if "Question-Family-Size" in csv_df.columns else None
+
+    # Graph-expanded answers are retained as auxiliary metadata for multi-reference datasets, but
+    # Answer-Entity remains the training/evaluation target by default.
+    graph_answer_ent = (
+        extract_literals(csv_df["Graph-Answer-Entity"], flatten=False)
+        if "Graph-Answer-Entity" in csv_df.columns else None
+    )
+    graph_answer_label = (
+        extract_literals(csv_df["Graph-Answer"], flatten=False)
+        if "Graph-Answer" in csv_df.columns else None
+    )
+
+    path_count = csv_df["Path-Count"] if "Path-Count" in csv_df.columns else None
+    graph_path_count = csv_df["Graph-Path-Count"] if "Graph-Path-Count" in csv_df.columns else None
     split_label = csv_df["SplitLabel"] if 'SplitLabel' in csv_df.columns else None
     hops = csv_df["Hops"] if 'Hops' in csv_df.columns else None
 
@@ -243,17 +524,44 @@ def process_and_cache_triviaqa_data(
     mapped_answer_ent = answer_ent.map(lambda ent: entity2id[ent]) if not is_multi_answer else answer_ent.map(
         lambda ans_list: [entity2id[ans] for ans in ans_list]
     )
+    if graph_answer_ent is not None:
+        mapped_graph_answer_ent = graph_answer_ent.map(
+            lambda ans_list: [entity2id[ans] for ans in ans_list]
+        ).rename("Graph-Answer-Entity")
+
     if paths is not None:
-        mapped_paths = paths.map(
-            lambda path: [
-                [entity2id[head], relation2id[rel], entity2id[tail]] 
-                for head, rel, tail in path
-            ]
-        )
+        if paths_are_multi_reference:
+            mapped_paths = paths.map(
+                lambda reference_paths: [
+                    [
+                        [entity2id[head], relation2id[rel], entity2id[tail]]
+                        for head, rel, tail in path
+                    ]
+                    for path in reference_paths
+                ]
+            )
+        else:
+            mapped_paths = paths.map(
+                lambda path: [
+                    [entity2id[head], relation2id[rel], entity2id[tail]]
+                    for head, rel, tail in path
+                ]
+            )
+        mapped_paths = mapped_paths.rename("Paths")
+
     if path_keys is not None:
-        mapped_path_keys = path_keys.map(
-            lambda keys: [relation2id[rel] for rel in keys.split("->")]
-        )
+        if path_keys_are_multi_reference:
+            mapped_path_keys = path_keys.map(
+                lambda keys: [
+                    [relation2id[rel] for rel in key.split("->")]
+                    for key in keys
+                ]
+            )
+        else:
+            mapped_path_keys = path_keys.map(
+                lambda keys: [relation2id[rel] for rel in keys.split("->")]
+            )
+        mapped_path_keys = mapped_path_keys.rename("Path-Key")
 
     # Generate unique timestamp for file naming
     timestamp = str(int(datetime.now().timestamp()))
@@ -276,16 +584,28 @@ def process_and_cache_triviaqa_data(
 
     # Combine all processed data into final DataFrame
     data_columns = [question_number, tokenized_questions, mapped_source_ent, mapped_answer_ent, source_label, answer_label]
+    if question_family_id is not None:
+        data_columns.append(question_family_id)
+    if question_family_size is not None:
+        data_columns.append(question_family_size)
     if questions_paraphrased is not None:
         data_columns.append(tokenized_questions_paraphrased)
     if questions_disambiguated is not None:
         data_columns.append(tokenized_questions_disambiguated)
+    if graph_answer_ent is not None:
+        data_columns.append(mapped_graph_answer_ent)
+    if graph_answer_label is not None:
+        data_columns.append(graph_answer_label)
     if paths is not None:
         data_columns.append(mapped_paths)
     if paths_label is not None:
         data_columns.append(paths_label)
     if path_keys is not None:
         data_columns.append(mapped_path_keys)
+    if path_count is not None:
+        data_columns.append(path_count)
+    if graph_path_count is not None:
+        data_columns.append(graph_path_count)
     if hops is not None:
         data_columns.append(hops)
     if split_label is not None:
@@ -341,16 +661,33 @@ def process_and_cache_triviaqa_data(
         "question_column": "Question",
         "question_paraphrased_column": "Question-Paraphrased" if questions_paraphrased is not None else None,
         "question_disambiguated_column": "Question-Disambiguated" if questions_disambiguated is not None else None,
+        "question_family_id_column": "Question-Family-ID" if question_family_id is not None else None,
+        "question_family_size_column": "Question-Family-Size" if question_family_size is not None else None,
         "source_label_column": "Source",
         "source_entities_column": "Source-Entity",
         "answer_label_column": "Answer",
         "answer_entity_column": "Answer-Entity",
+        "graph_answer_label_column": "Graph-Answer" if graph_answer_label is not None else None,
+        "graph_answer_entity_column": "Graph-Answer-Entity" if graph_answer_ent is not None else None,
         "paths_column": "Paths" if paths is not None else None,
+        "paths_source_column": raw_paths_column,
+        "paths_are_multi_reference": paths_are_multi_reference,
         "paths_label_column": "Paths-Label" if paths_label is not None else None,
+        "paths_label_source_column": raw_paths_label_column,
         "path_keys_column": "Path-Key" if path_keys is not None else None,
+        "path_keys_source_column": raw_path_keys_column,
+        "path_keys_are_multi_reference": path_keys_are_multi_reference,
+        "path_count_column": "Path-Count" if path_count is not None else None,
+        "graph_path_count_column": "Graph-Path-Count" if graph_path_count is not None else None,
         "hops_column": "Hops" if hops is not None else None,
         "splitLabel_column": "SplitLabel" if split_label is not None else None,
         "is_multi_answer": is_multi_answer,
+        "cache_schema_version": QA_CACHE_SCHEMA_VERSION,
+        "qa_schema": (
+            "multi_reference"
+            if paths_are_multi_reference or path_keys_are_multi_reference
+            else "single_reference"
+        ),
         "date_processed": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "saved_paths": cached_split_locations,
         "timestamp": timestamp,

@@ -84,6 +84,92 @@ Supported optional columns include:
 
 The released navigation datasets already provide their expected schema. For custom data, use the same column names because the current preprocessing code maps them directly.
 
+### Multi-annotated reference schema
+
+Some datasets provide multiple valid path annotations and/or relation-chain
+annotations for the same question. MINERVA supports this richer
+**multi-annotated reference schema** while remaining backward-compatible with
+datasets that provide a single reference path or relation chain.
+
+The preprocessing layer normalizes the following fields into MINERVA's internal
+representation:
+
+| Input column | Internal MINERVA representation | Use |
+| --- | --- | --- |
+| <code>Multi-Paths</code> | <code>Paths</code> containing a list of entity-level reference paths | Best-reference PED, F1<sub>SG</sub>, and node-set overlap |
+| <code>Multi-Paths-Key</code> | <code>Path-Key</code> containing a list of relation chains | Best-reference RED and F1<sub>REL</sub> |
+| <code>Question-Family-ID</code> | Preserved | Family-aware downstream analysis |
+| <code>Question-Family-Size</code> | Preserved | Family-size metadata and analysis |
+| <code>Graph-Answer-Entity</code> | Mapped to entity IDs and preserved | Auxiliary graph-expanded answer set |
+| <code>Path-Count</code> | Preserved | Number of released reference paths |
+| <code>Graph-Path-Count</code> | Preserved | Number of graph-consistent path realizations |
+
+Datasets using the legacy schema continue to provide <code>Paths</code> and
+<code>Path-Key</code> directly. Their existing single-reference representation
+is preserved, so the same preprocessing and evaluation pipeline remains
+compatible with KINSHIP, MQuAKE-ST, MetaQA, and other datasets following that
+format.
+
+Regardless of the reference-path schema, the default answer reward and standard
+Hits@K evaluation use the released <code>Answer-Entity</code> field.
+<code>Graph-Answer-Entity</code>, when available, is retained as auxiliary
+metadata and does not replace the released answer target unless an evaluation
+protocol explicitly requests the graph-expanded answer set.
+
+When multiple released entity-level reference paths are available, path-fidelity
+metrics use best-reference matching:
+
+```math
+\mathrm{PED}(q)
+=
+\min_{P^\star \in \mathcal{R}(q)}
+\mathrm{PED}\!\left(P_{\mathrm{pred}}(q), P^\star\right)
+```
+
+```math
+F1_{\mathrm{SG}}(q)
+=
+\max_{P^\star \in \mathcal{R}(q)}
+F1_{\mathrm{SG}}\!\left(P_{\mathrm{pred}}(q), P^\star\right)
+```
+
+where $\mathcal{R}(q)$ is the set of released entity-level reference paths for
+question $q$.
+
+Likewise, when multiple released relation chains are available:
+
+```math
+\mathrm{RED}(q)
+=
+\min_{R^\star \in \mathcal{R}_{\mathrm{rel}}(q)}
+\mathrm{RED}\!\left(R_{\mathrm{pred}}(q), R^\star\right)
+```
+
+```math
+F1_{\mathrm{REL}}(q)
+=
+\max_{R^\star \in \mathcal{R}_{\mathrm{rel}}(q)}
+F1_{\mathrm{REL}}\!\left(R_{\mathrm{pred}}(q), R^\star\right)
+```
+
+This prevents an agent from being penalized for following one released-valid
+reasoning trajectory when several valid annotations are provided.
+
+When entity-level reference paths are unavailable but annotated relation chains
+are present, MINERVA can instead reconstruct answer-consistent entity-level
+reference paths from the source entity, annotated relation chain(s), released
+answer set, and active evaluator graph. These reconstructed references are
+treated separately from directly released path annotations.
+
+This prevents an agent from being penalized for following one released-valid
+reasoning trajectory when several valid annotations are provided.
+
+When entity-level reference paths are unavailable but annotated relation chains
+are present, MINERVA can instead reconstruct answer-consistent entity-level
+reference paths from the source entity, annotated relation chain(s), released
+answer set, and active evaluator graph. These reconstructed references are
+treated separately from directly released path annotations.
+
 ## Single-answer and multi-answer encoding
 
 A single-answer row stores one graph entity in <code>Answer-Entity</code>:

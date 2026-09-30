@@ -1285,8 +1285,8 @@ class TrainerNLQ(object):
                 elif use_test_semantic_multi_path_eval:
                     # Test-only multi-answer PED/F1_SG against all semantically valid
                     # entity-level paths generated from the Path-Key relation chain.
-                    overlap_scores = episode.get_multi_answer_subgraph_overlap(merged_path, b)
-                    ed_dist = episode.get_multi_answer_path_edit_distance(merged_path, b)
+                    overlap_scores = episode.get_reconstructed_subgraph_overlap(merged_path, b)
+                    ed_dist = episode.get_reconstructed_path_edit_distance(merged_path, b)
                     if overlap_scores is not None and ed_dist is not None:
                         precision, recall, f1_score = overlap_scores
                         all_final_path_precision += precision

@@ -183,8 +183,8 @@ def compute_path_fidelity(
         metrics["PED"] = float(episode.get_path_edit_distance(cleaned, idx))
         metrics["F1_SG"] = float(episode.get_subgraph_overlap(cleaned, idx)[2])
     elif episode.multi_answers and episode.path_key_exists and episode.mode == "test":
-        ped = episode.get_multi_answer_path_edit_distance(cleaned, idx)
-        overlap = episode.get_multi_answer_subgraph_overlap(cleaned, idx)
+        ped = episode.get_reconstructed_path_edit_distance(cleaned, idx)
+        overlap = episode.get_reconstructed_subgraph_overlap(cleaned, idx)
         metrics["PED"] = float(ped) if ped is not None else None
         metrics["F1_SG"] = float(overlap[2]) if overlap is not None else None
 
