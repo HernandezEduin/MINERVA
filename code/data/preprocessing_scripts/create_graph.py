@@ -16,6 +16,13 @@ def parse_args(args=None):
                         help="If set, will create a full graph with all triplets, otherwise will create a graph with only training triplets")
     parser.add_argument("-p", "--priority_triples", action="store_true",
                         help="If set, will create a graph with the priority triplets first")
+    parser.add_argument("--full_graph_file", type=str, default="triplets.txt",
+                        help="Name of the file containing the full graph triplets")
+    parser.add_argument("--graph_file", type=str, default="train.txt",
+                        help="Name of the file containing the training triplets")
+    parser.add_argument("--priority_file", type=str, default="priority.txt",
+                        help="Name of the file containing the priority triplets")
+    
     return parser.parse_args(args)
 
 
@@ -30,12 +37,12 @@ if __name__ == '__main__':
 
     if args.full_graph:
         # check if triplets files exist
-        if os.path.exists(os.path.join(dir, 'triplets.txt')):
-            graphs = ['triplets.txt']
+        if os.path.exists(os.path.join(dir, args.full_graph_file)):
+            graphs = [args.full_graph_file]
         else:
             graphs = ['train.txt', 'dev.txt', 'test.txt']
     else:
-        graphs = ['train.txt']
+        graphs = [args.graph_file]
 
     triplets = []
     for f in graphs:
@@ -47,7 +54,7 @@ if __name__ == '__main__':
 
     if args.priority_triples and args.full_graph:
         priority_triplets = set()
-        with open(os.path.join(dir, 'priority.txt')) as raw_file:
+        with open(os.path.join(dir, args.priority_file)) as raw_file:
             for line in raw_file:
                 e1, r, e2 = re.split(r'\t+', line.strip())
                 priority_triplets.add((e1, r, e2))
