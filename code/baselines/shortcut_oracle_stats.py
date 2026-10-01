@@ -16,6 +16,7 @@ from code.baselines.baseline_path_fidelity import (
     load_eval_frames,
     make_episode,
     metric_availability_notes,
+    resolve_reference_scope,
     row_id,
     shortest_path_to_answer,
     write_results,
@@ -51,7 +52,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-self-loops", action="store_true",
                         help="Accepted for compatibility. NO_OP self-loops are ignored by shortest-path search.")
     parser.add_argument("--use-full-graph", action="store_true",
-                        help="If set, use full_graph.txt instead of graph.txt.")
+                        help="If set, navigate on full_graph.txt instead of graph.txt (source vs. filtered graph for datasets that provide both).")
+    parser.add_argument("--reference-scope", choices=["released", "graph"], default="released",
+                        help="Use released answers/path references or graph-expanded answers/path references. Independent of --use-full-graph.")
     parser.add_argument("--include-inverse-relations", action="store_true",
                         help="If set, allow inverse relation actions. By default the directed evaluator action space is used.")
     parser.add_argument("--use-stop-signal", action="store_true")
@@ -70,15 +73,19 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
         df=df,
         metadata=metadata,
         path_length=hop_budget,
+        reference_scope=args.reference_scope,
         use_stop_signal=args.use_stop_signal,
         use_restart_signal=args.use_restart_signal,
     )
-    multi_answers = bool(metadata.get("is_multi_answer", False))
+    answer_column, _, multi_answers = resolve_reference_scope(
+        metadata,
+        args.reference_scope,
+    )
     rows: List[Dict[str, Any]] = []
 
     for local_idx, (_, row) in enumerate(tqdm(df.iterrows(), total=len(df), desc=f"Oracle {name}", leave=False)):
         start = int(row["Source-Entity"])
-        answers = answer_set(row["Answer-Entity"], multi_answers)
+        answers = answer_set(row[answer_column], multi_answers)
         path = shortest_path_to_answer(
             grapher=grapher,
             start=start,
@@ -125,12 +132,13 @@ def print_summary(summary: Dict[str, Any], output_path: str) -> None:
     print("Answer-oracle shortest-path path-fidelity baseline")
     print("=" * 88)
     print(f"Evaluated questions:            {summary['num_evaluated_questions']}")
+    print(f"Reference scope:                {summary['reference_scope']}")
     print(f"Missing-path questions:         {summary['missing_path_count']} ({format_metric(summary['missing_path_rate'])})")
     print(f"Answer success rate:            {format_metric(summary['answer_success_rate'])}")
     print(f"Average shortest-path length:   {format_metric(summary['average_shortest_path_length'])}")
-    print(f"Average annotated-path length:  {format_metric(summary['average_annotated_path_length'])}")
+    print(f"Average reference-path length:  {format_metric(summary['average_reference_path_length'])}")
     print(f"Average shortest/ref ratio:     {format_metric(summary['average_shortest_to_reference_length_ratio'])}")
-    print(f"Exact annotated-path matches:   {summary['exact_match_count']} ({format_metric(summary['exact_match_rate'])})")
+    print(f"Exact reference-path matches:   {summary['exact_match_count']} ({format_metric(summary['exact_match_rate'])})")
     print(f"Correct answer, different path: {summary['different_path_success_count']} ({format_metric(summary['different_path_success_rate'])})")
     print("-" * 88)
     print(f"Average PED:    {format_metric(summary.get('average_PED'))}")
@@ -191,14 +199,17 @@ def main() -> None:
         "max_samples": args.max_samples,
         "hop_budget": hop_budget,
         "graph": "full_graph.txt" if args.use_full_graph else "graph.txt",
+        "reference_scope": args.reference_scope,
         "use_directed_graph": not args.include_inverse_relations,
         "self_loops_ignored_by_search": True,
         "tie_breaking": "BFS with outgoing actions sorted by (relation_id, target_entity_id)",
-        "metric_availability_notes": metric_availability_notes(metadata),
+        "metric_availability_notes": metric_availability_notes(metadata, args.reference_scope),
         "answer_success_rate": float(successes / n) if n else None,
         "missing_path_count": missing,
         "missing_path_rate": float(missing / n) if n else None,
         "average_shortest_path_length": float(np.mean(shortest_lengths)) if shortest_lengths else None,
+        "average_reference_path_length": float(np.mean(reference_lengths)) if reference_lengths else None,
+        # Backward-compatible alias retained for existing result consumers.
         "average_annotated_path_length": float(np.mean(reference_lengths)) if reference_lengths else None,
         "average_shortest_to_reference_length_ratio": float(np.mean(ratios)) if ratios else None,
         "exact_match_count": exact_matches,

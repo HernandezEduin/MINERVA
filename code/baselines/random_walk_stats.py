@@ -12,10 +12,12 @@ from code.baselines.baseline_path_fidelity import (
     compute_path_fidelity,
     default_cache_path,
     effective_reference_length,
+    exact_reference_match,
     format_metric,
     load_eval_frames,
     make_episode,
     metric_availability_notes,
+    resolve_reference_scope,
     row_id,
     valid_actions,
     write_results,
@@ -51,7 +53,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-self-loops", action="store_true",
                         help="If set, allow NO_OP self-loop actions during random-walk generation.")
     parser.add_argument("--use-full-graph", action="store_true",
-                        help="If set, use full_graph.txt instead of graph.txt.")
+                        help="If set, navigate on full_graph.txt instead of graph.txt (source vs. filtered graph for datasets that provide both).")
+    parser.add_argument("--reference-scope", choices=["released", "graph"], default="released",
+                        help="Use released answers/path references or graph-expanded answers/path references. Independent of --use-full-graph.")
     parser.add_argument("--include-inverse-relations", action="store_true",
                         help="If set, allow inverse relation actions. By default the directed evaluator action space is used.")
     parser.add_argument("--use-stop-signal", action="store_true")
@@ -95,15 +99,19 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
         df=df,
         metadata=metadata,
         path_length=hop_budget,
+        reference_scope=args.reference_scope,
         use_stop_signal=args.use_stop_signal,
         use_restart_signal=args.use_restart_signal,
     )
-    multi_answers = bool(metadata.get("is_multi_answer", False))
+    answer_column, _, multi_answers = resolve_reference_scope(
+        metadata,
+        args.reference_scope,
+    )
     rows: List[Dict[str, Any]] = []
 
     for local_idx, (_, row) in enumerate(tqdm(df.iterrows(), total=len(df), desc=f"Random walk {name}", leave=False)):
         start = int(row["Source-Entity"])
-        answers = answer_set(row["Answer-Entity"], multi_answers)
+        answers = answer_set(row[answer_column], multi_answers)
         walk_metrics: List[Dict[str, Optional[float]]] = []
         answer_hits: List[float] = []
         exact_path_hits: List[float] = []
@@ -118,7 +126,8 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
             walk_metrics.append(compute_path_fidelity(episode, raw_path, local_idx, args.path_segment_policy))
 
             if args.use_ideal_paths and episode.paths_exists:
-                exact_path_hits.append(1.0 if [tuple(edge) for edge in cleaned] == [tuple(edge) for edge in episode.paths[local_idx]] else 0.0)
+                exact_match = exact_reference_match(episode, cleaned, local_idx)
+                exact_path_hits.append(1.0 if exact_match else 0.0)
 
         means = metric_means(walk_metrics)
         per_question: Dict[str, Any] = {
@@ -149,6 +158,7 @@ def print_summary(summary: Dict[str, Any], output_path: Optional[str]) -> None:
     print(f"Seed:                {summary['seed']}")
     print(f"Hop budget:          {summary['hop_budget']}")
     print(f"Graph:               {summary['graph']}")
+    print(f"Reference scope:     {summary['reference_scope']}")
     print(f"Self-loops sampled:  {summary['use_self_loops']}")
     print("-" * 88)
     print(f"Average PED:    {format_metric(summary.get('average_PED'))}")
@@ -205,10 +215,11 @@ def main() -> None:
         "max_samples": args.max_samples,
         "hop_budget": hop_budget,
         "graph": "full_graph.txt" if args.use_full_graph else "graph.txt",
+        "reference_scope": args.reference_scope,
         "use_self_loops": bool(args.use_self_loops),
         "use_directed_graph": not args.include_inverse_relations,
         "path_segment_policy": args.path_segment_policy,
-        "metric_availability_notes": metric_availability_notes(metadata),
+        "metric_availability_notes": metric_availability_notes(metadata, args.reference_scope),
         "RW_Ans": float(np.mean([row["answer_reached"] for row in per_question])) if per_question else None,
     })
     if args.use_ideal_paths and per_question and "RW_Path" in per_question[0]:

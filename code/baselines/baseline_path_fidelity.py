@@ -79,6 +79,75 @@ def answer_set(answer_value: Any, multi_answers: bool) -> Set[int]:
     return {int(answer_value)}
 
 
+def _is_encoded_edge(value: Any) -> bool:
+    """Return True when value structurally resembles one encoded KG edge."""
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 3
+        and not any(isinstance(x, (list, tuple, np.ndarray, dict)) for x in value)
+    )
+
+
+def flatten_reference_paths(value: Any) -> List[List[List[int]]]:
+    """Normalize arbitrarily grouped path annotations to a flat list of paths.
+
+    Released multi-annotated references and graph-expanded references may have
+    different outer grouping levels. The evaluator only needs the complete set
+    of entity-level reference paths, so grouping is removed while each path and
+    its edge order are preserved.
+    """
+    refs: List[List[List[int]]] = []
+
+    def visit(obj: Any) -> None:
+        if isinstance(obj, np.ndarray):
+            obj = obj.tolist()
+        if not isinstance(obj, (list, tuple)) or len(obj) == 0:
+            return
+        if all(_is_encoded_edge(edge) for edge in obj):
+            refs.append([[int(x) for x in edge] for edge in obj])
+            return
+        for child in obj:
+            visit(child)
+
+    visit(value)
+    return refs
+
+
+def resolve_reference_scope(
+    metadata: Dict[str, Any],
+    reference_scope: str,
+) -> Tuple[str, Optional[str], bool]:
+    """Resolve answer/path columns and answer cardinality for one reference scope.
+
+    The released scope selects benchmark-released answers and entity-level
+    reference paths. The graph scope selects graph-expanded answers and
+    graph-expanded reference paths. Relation-chain annotations remain the
+    released Path-Key semantics in both cases.
+    """
+    if reference_scope == "released":
+        answer_column = metadata.get("answer_entity_column") or "Answer-Entity"
+        paths_column = metadata.get("paths_column")
+        multi_answers = bool(metadata.get("is_multi_answer", False))
+    elif reference_scope == "graph":
+        answer_column = metadata.get("graph_answer_entity_column")
+        paths_column = metadata.get("graph_multi_paths_column")
+        multi_answers = bool(metadata.get("is_multi_answer_graph", False))
+        if answer_column is None:
+            raise ValueError(
+                "reference_scope='graph' requires Graph-Answer-Entity in the "
+                "processed QA cache. Reprocess with --force-data-prepro if the "
+                "cache predates graph-expanded reference support."
+            )
+    else:
+        raise ValueError(
+            f"Invalid reference_scope={reference_scope!r}; expected 'released' or 'graph'."
+        )
+
+    return answer_column, paths_column, multi_answers
+
+
 def row_id(row: Any, fallback: int) -> Any:
     if "Question-Number" in row.index:
         value = row["Question-Number"]
@@ -123,15 +192,43 @@ def make_episode(
     df: Any,
     metadata: Dict[str, Any],
     path_length: int,
+    reference_scope: str = "released",
     use_stop_signal: bool = False,
     use_restart_signal: bool = False,
 ) -> EpisodeNLQ:
-    starts = df["Source-Entity"].to_numpy(dtype=np.int32)
-    multi_answers = bool(metadata.get("is_multi_answer", False))
-    answers = df["Answer-Entity"].tolist() if multi_answers else df["Answer-Entity"].to_numpy(dtype=np.int32)
-    paths = df["Paths"].tolist() if metadata.get("paths_column") is not None and "Paths" in df.columns else None
-    path_keys = df["Path-Key"].tolist() if metadata.get("path_keys_column") is not None and "Path-Key" in df.columns else None
-    hops = df["Hops"].tolist() if "Hops" in df.columns else None
+    source_column = metadata.get("source_entities_column") or "Source-Entity"
+    answer_column, paths_column, multi_answers = resolve_reference_scope(
+        metadata,
+        reference_scope,
+    )
+
+    if answer_column not in df.columns:
+        raise ValueError(
+            f"Selected answer column {answer_column!r} is missing from the cached QA split."
+        )
+
+    starts = df[source_column].to_numpy(dtype=np.int32)
+    answers = (
+        df[answer_column].tolist()
+        if multi_answers
+        else df[answer_column].to_numpy(dtype=np.int32)
+    )
+
+    # EpisodeNLQ expects either one path or a flat list of reference paths.
+    # Graph-Multi-Paths may retain relation-chain grouping in the cache, so
+    # normalize both released and graph scopes to the same evaluator shape.
+    paths = None
+    if paths_column is not None and paths_column in df.columns:
+        paths = [flatten_reference_paths(value) for value in df[paths_column].tolist()]
+
+    path_keys_column = metadata.get("path_keys_column")
+    path_keys = (
+        df[path_keys_column].tolist()
+        if path_keys_column is not None and path_keys_column in df.columns
+        else None
+    )
+    hops_column = metadata.get("hops_column")
+    hops = df[hops_column].tolist() if hops_column is not None and hops_column in df.columns else None
     dummy_questions = [[] for _ in range(len(df))]
     dummy_embeddings = np.zeros((len(df), 1), dtype=np.float32)
     return EpisodeNLQ(
@@ -154,11 +251,10 @@ def make_episode(
 
 
 def effective_reference_length(episode: EpisodeNLQ, idx: int) -> Optional[int]:
-    if episode.paths_exists:
-        return len(episode.paths[idx])
-    if episode.path_key_exists:
-        return len(episode.path_keys[idx])
-    return None
+    """Return the evaluator's reference hop count for one question."""
+    if not (episode.paths_exists or episode.path_key_exists):
+        return None
+    return int(episode.get_path_length(idx))
 
 
 def cleaned_path_and_relations(
@@ -258,15 +354,23 @@ def canonical_semantic_path(episode: EpisodeNLQ, pred_path: Sequence[Edge]) -> L
 
 
 def exact_reference_match(episode: EpisodeNLQ, pred_path: Sequence[Edge], idx: int) -> Optional[bool]:
+    """Return whether a prediction exactly matches any active reference."""
     if episode.paths_exists:
-        return canonical_semantic_path(episode, pred_path) == [tuple(edge) for edge in episode.paths[idx]]
+        pred = canonical_semantic_path(episode, pred_path)
+        return any(
+            pred == [episode.canon_edge(*edge) for edge in ref_path]
+            for ref_path in episode.get_paths(idx)
+        )
     if episode.path_key_exists:
         pred_rels = [
             episode.canon_rel(r)
             for _, r, _ in pred_path
             if r not in episode.special_tokens and r != episode.grapher.rNO_OP
         ]
-        return pred_rels == list(episode.path_keys[idx])
+        return any(
+            pred_rels == list(chain)
+            for chain in episode.get_reference_relation_chains(idx)
+        )
     return None
 
 
@@ -313,17 +417,27 @@ def write_results(path: Optional[str], output_format: str, payload: Dict[str, An
 
 
 
-def metric_availability_notes(metadata: Dict[str, Any]) -> Dict[str, str]:
+def metric_availability_notes(
+    metadata: Dict[str, Any],
+    reference_scope: str = "released",
+) -> Dict[str, str]:
     notes: Dict[str, str] = {}
-    has_paths = metadata.get("paths_column") is not None
+    _, paths_column, is_multi_answer = resolve_reference_scope(metadata, reference_scope)
+    has_paths = paths_column is not None
     has_path_keys = metadata.get("path_keys_column") is not None
-    is_multi_answer = bool(metadata.get("is_multi_answer", False))
+
     if not has_paths and not (is_multi_answer and has_path_keys):
-        notes["PED"] = "unavailable: no entity-level reference Paths column and no multi-answer Path-Key semantic expansion"
-        notes["F1_SG"] = "unavailable: no entity-level reference Paths column and no multi-answer Path-Key semantic expansion"
+        notes["PED"] = (
+            "unavailable: no entity-level reference paths and no multi-answer "
+            "Path-Key reconstruction"
+        )
+        notes["F1_SG"] = (
+            "unavailable: no entity-level reference paths and no multi-answer "
+            "Path-Key reconstruction"
+        )
     if not has_paths and not has_path_keys:
-        notes["RED"] = "unavailable: no Paths or Path-Key reference data"
-        notes["F1_Rel"] = "unavailable: no Paths or Path-Key reference data"
+        notes["RED"] = "unavailable: no entity-level paths or Path-Key relation references"
+        notes["F1_Rel"] = "unavailable: no entity-level paths or Path-Key relation references"
     return notes
 
 
