@@ -284,6 +284,61 @@ def _normalize_multi_path_keys(value: Any) -> List[str]:
         return [str(key) for key in value]
     raise TypeError(f"Unsupported Multi-Paths-Key value: {type(value)!r}")
 
+def _map_path_structure(
+    value: Any,
+    entity2id: Dict[str, int],
+    relation2id: Dict[str, int],
+) -> Any:
+    """
+    Recursively map entity and relation identifiers in a nested path annotation.
+
+    The function preserves the nesting structure of the input. Whenever a
+    graph-edge triplet ``[head, relation, tail]`` is encountered, the head and
+    tail are mapped through ``entity2id`` and the relation through
+    ``relation2id``.
+
+    This supports both single-reference paths and arbitrarily grouped
+    multi-annotated reference paths.
+
+    Args:
+        value:
+            A path annotation consisting of nested lists/tuples whose leaves
+            are ``[head, relation, tail]`` triplets.
+        entity2id:
+            Mapping from entity identifiers to integer vocabulary IDs.
+        relation2id:
+            Mapping from relation identifiers to integer vocabulary IDs.
+
+    Returns:
+        Any:
+            The same nested path structure with every graph-edge triplet
+            converted to integer vocabulary IDs.
+
+    Raises:
+        TypeError:
+            If an unexpected non-container value is encountered outside a
+            valid edge triplet.
+        KeyError:
+            If an annotated entity or relation is absent from the corresponding
+            vocabulary.
+    """
+    if _is_triplet_like(value):
+        head, relation, tail = value
+        return [
+            entity2id[head],
+            relation2id[relation],
+            entity2id[tail],
+        ]
+
+    if isinstance(value, (list, tuple)):
+        return [
+            _map_path_structure(child, entity2id, relation2id)
+            for child in value
+        ]
+
+    raise TypeError(
+        f"Unsupported path annotation value: {type(value)!r}"
+    )
 
 def paraphrase2question(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -458,6 +513,18 @@ def process_and_cache_triviaqa_data(
     else:
         paths = None
 
+    graph_multi_paths = (
+        extract_literals(csv_df["Graph-Multi-Paths"])
+        if "Graph-Multi-Paths" in csv_df.columns
+        else None
+    )
+
+    graph_multi_paths_label = (
+        extract_literals(csv_df["Graph-Multi-Paths-Label"])
+        if "Graph-Multi-Paths-Label" in csv_df.columns
+        else None
+    )
+
     raw_paths_label_column = (
         "Multi-Paths-Label" if "Multi-Paths-Label" in csv_df.columns
         else "Paths-Label" if "Paths-Label" in csv_df.columns
@@ -530,24 +597,22 @@ def process_and_cache_triviaqa_data(
         ).rename("Graph-Answer-Entity")
 
     if paths is not None:
-        if paths_are_multi_reference:
-            mapped_paths = paths.map(
-                lambda reference_paths: [
-                    [
-                        [entity2id[head], relation2id[rel], entity2id[tail]]
-                        for head, rel, tail in path
-                    ]
-                    for path in reference_paths
-                ]
+        mapped_paths = paths.map(
+            lambda value: _map_path_structure(
+                value,
+                entity2id,
+                relation2id,
             )
-        else:
-            mapped_paths = paths.map(
-                lambda path: [
-                    [entity2id[head], relation2id[rel], entity2id[tail]]
-                    for head, rel, tail in path
-                ]
+        ).rename("Paths")
+
+    if graph_multi_paths is not None:
+        mapped_graph_multi_paths = graph_multi_paths.map(
+            lambda value: _map_path_structure(
+                value,
+                entity2id,
+                relation2id,
             )
-        mapped_paths = mapped_paths.rename("Paths")
+        ).rename("Graph-Multi-Paths")
 
     if path_keys is not None:
         if path_keys_are_multi_reference:
@@ -596,6 +661,10 @@ def process_and_cache_triviaqa_data(
         data_columns.append(mapped_graph_answer_ent)
     if graph_answer_label is not None:
         data_columns.append(graph_answer_label)
+    if graph_multi_paths is not None:
+        data_columns.append(mapped_graph_multi_paths)
+    if graph_multi_paths_label is not None:
+        data_columns.append(graph_multi_paths_label)
     if paths is not None:
         data_columns.append(mapped_paths)
     if paths_label is not None:
@@ -669,6 +738,16 @@ def process_and_cache_triviaqa_data(
         "answer_entity_column": "Answer-Entity",
         "graph_answer_label_column": "Graph-Answer" if graph_answer_label is not None else None,
         "graph_answer_entity_column": "Graph-Answer-Entity" if graph_answer_ent is not None else None,
+        "graph_multi_paths_column": (
+            "Graph-Multi-Paths"
+            if graph_multi_paths is not None
+            else None
+        ),
+        "graph_multi_paths_label_column": (
+            "Graph-Multi-Paths-Label"
+            if graph_multi_paths_label is not None
+            else None
+        ),
         "paths_column": "Paths" if paths is not None else None,
         "paths_source_column": raw_paths_column,
         "paths_are_multi_reference": paths_are_multi_reference,
