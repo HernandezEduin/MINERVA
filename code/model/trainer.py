@@ -936,13 +936,15 @@ class TrainerNLQ(object):
             all_post_restart_success_rate_top_rollout = None
             all_restart_and_hit_rate_top_rollout = None
 
-        use_test_semantic_multi_path_eval = (
+        # Determine if we need to reconstruct reference paths for evaluation
+        # as this is expensive, we only do it for test mode with multi-answer and path keys, but no paths
+        reconstruct_reference_path = (
             mode == 'test'
             and self.environment.has_multi_answers()
             and self.environment.has_path_keys()
             and not self.environment.has_paths()
         )
-        path_metrics_enabled = self.environment.has_paths() or use_test_semantic_multi_path_eval
+        path_metrics_enabled = self.environment.has_paths() or reconstruct_reference_path
 
         if path_metrics_enabled:
             all_final_path_recall = 0
@@ -1282,7 +1284,7 @@ class TrainerNLQ(object):
                     all_edit_distance[gt_hop] += ed_dist
                     all_path_hop_count[gt_hop] += 1
                     all_path_metric_examples += 1
-                elif use_test_semantic_multi_path_eval:
+                elif reconstruct_reference_path:
                     # Test-only multi-answer PED/F1_SG against all semantically valid
                     # entity-level paths generated from the Path-Key relation chain.
                     overlap_scores = episode.get_reconstructed_subgraph_overlap(merged_path, b)
