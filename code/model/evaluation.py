@@ -91,6 +91,7 @@ if __name__ == '__main__':
         data_input_dir=options['data_input_dir'],
         question_tokenizer_name=options['question_tokenizer_name'],
         question_format=options['question_format'],
+        reference_scope=options['reference_scope'],
         cached_QAMetaData_path=options['cached_QAMetaData_path'],
         raw_QAData_path=options['raw_QAData_path'],
         force_data_prepro=False,

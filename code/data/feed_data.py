@@ -49,6 +49,7 @@ class QuestionBatcher:
         test_batch_size: int, 
         question_tokenizer_name: str,
         question_format: str,
+        reference_scope: str,
         cached_QAMetaData_path: str,
         raw_QAData_path: str,
         mode: str = "train",
@@ -67,6 +68,7 @@ class QuestionBatcher:
             test_batch_size: Number of samples per batch during evaluation
             question_tokenizer_name: HuggingFace model name for question tokenization
             question_format: Format of the question input ('full_text', 'relation_only', 'graph_only')
+            reference_scope: Scope of the reference annotations ('released', 'graph')
             cached_QAMetaData_path: Path to cached preprocessed QA metadata JSON
             raw_QAData_path: Path to raw QA dataset CSV file
             mode: Initial mode ('train', 'dev', or 'test')
@@ -96,6 +98,7 @@ class QuestionBatcher:
         self.test_df: pd.DataFrame
         self.train_metadata: Dict
         self.question_format: str = question_format
+        self.reference_scope: str = reference_scope
         self.evaluate_paraphrases: bool = evaluate_paraphrases
         self.train_df, self.dev_df, self.test_df, self.train_metadata = load_qa_data(
             cached_metadata_path=cached_QAMetaData_path,
@@ -108,17 +111,52 @@ class QuestionBatcher:
             force_recompute=force_data_prepro,
         )
 
-        self.multi_answers: bool = self.train_metadata.get("is_multi_answer", False)
-        self.path_exists: bool = True if self.train_metadata.get("paths_column") is not None else False
+        self.question_column = self.train_metadata.get("question_column")
+        self.question_paraphrased_column = self.train_metadata.get("question_paraphrased_column")
+        self.question_number_column = self.train_metadata.get("question_number_column")
+        self.source_label_column = self.train_metadata.get("source_label_column")
+        self.source_entity_column = self.train_metadata.get("source_entities_column")
+        self.hops_column = self.train_metadata.get("hops_column")
+        self.path_keys_column = self.train_metadata.get("path_keys_column")
+
+        if question_format == 'paraphrased' and self.question_paraphrased_column is None:
+            raise ValueError("Paraphrased questions are requested but not available in the dataset.")
+        if evaluate_paraphrases and self.question_paraphrased_column is None:
+            raise ValueError("Paraphrased questions are requested but not available in the dataset.")
+        if reference_scope not in ['released', 'graph']:
+            raise ValueError(f"Invalid reference_scope: {reference_scope}. Must be 'released' or 'graph', got {reference_scope}.")
+        
+        if self.reference_scope == "released":
+            self.answer_entity_column = "Answer-Entity"
+            self.answer_label_column = "Answer"
+            self.paths_column = ("Paths" if self.train_metadata.get("paths_column") is not None else None)
+            self.paths_label_column = (
+                "Paths-Label"
+                if self.train_metadata.get("paths_label_column") is not None
+                else None
+            )
+            self.multi_answers = self.train_metadata.get("is_multi_answer", False)
+
+        else:
+            self.answer_entity_column = self.train_metadata.get("graph_answer_entity_column")
+            self.answer_label_column = self.train_metadata.get("graph_answer_label_column")
+            self.paths_column = self.train_metadata.get("graph_multi_paths_column")
+            self.paths_label_column = self.train_metadata.get("graph_multi_paths_label_column")
+            self.multi_answers = self.train_metadata.get("is_multi_answer_graph", False)
+
+            # check that all are valid if reference_scope is 'graph'
+            if (self.answer_entity_column is None or self.answer_label_column is None or self.paths_column is None or self.paths_label_column is None):
+                raise ValueError(
+                    "reference_scope='graph' was requested, but the dataset "
+                    "does not provide Graph-Answer-Entity, Graph-Answer, "
+                    "Graph-Multi-Paths, or Graph-Multi-Paths-Label."
+                )
+
+        self.path_exists: bool = self.paths_column is not None
         self.path_key_exists: bool = True if self.train_metadata.get("path_keys_column") is not None else False
 
-        if question_format == 'paraphrased' and self.train_metadata.get("question_paraphrased_column") is None:
-            raise ValueError("Paraphrased questions are requested but not available in the dataset.")
-        if evaluate_paraphrases and self.train_metadata.get("question_paraphrased_column") is None:
-            raise ValueError("Paraphrased questions are requested but not available in the dataset.")
         if question_format == 'relation_only' and not (self.path_exists or self.path_key_exists):
             raise ValueError("Relation-only format is requested but no path/path-key information is available in the dataset.")
-
 
         if evaluate_paraphrases:
             # For evaluation with paraphrased questions, we will use the paraphrased questions as the main 'Question' column for consistency in batching and embedding generation.
@@ -158,14 +196,14 @@ class QuestionBatcher:
         Returns:
             np.ndarray of shape [len(train_df)] summing to 1, or None if Hops is missing.
         """
-        if "Hops" not in self.train_df.columns:
+        if self.hops_column is None:
             return None
 
-        hops = pd.to_numeric(self.train_df["Hops"], errors="coerce")
+        hops = pd.to_numeric(self.train_df[self.hops_column], errors="coerce")
         if hops.isna().any():
             bad_rows = hops[hops.isna()].index.tolist()[:10]
             raise ValueError(
-                f"Found non-numeric or missing values in train_df['Hops'] at rows like: {bad_rows}"
+                f"Found non-numeric or missing values in train_df['{self.hops_column}'] at rows like: {bad_rows}"
             )
 
         hop_counts = hops.value_counts()
@@ -370,18 +408,18 @@ class QuestionBatcher:
             
             batch = self.eval_df.iloc[batch_idx]
             
-            source_ent: np.ndarray = batch["Source-Entity"].to_numpy(dtype=int)
-            answers: Union[np.ndarray, List[List[int]]] = batch['Answer-Entity'].to_numpy(dtype=int) if not self.multi_answers else batch['Answer-Entity'].tolist()
-            paths: List[List[List[str, str, str]]] = batch['Paths'].tolist() if self.path_exists else None
-            path_keys: List[List[str]] = batch['Path-Key'].tolist() if self.path_key_exists else None
-            hops: List[int] = batch['Hops'].tolist()
-            ques_ids: List[int] = batch['Question-Number'].tolist()
+            source_ent: np.ndarray = batch[self.source_entity_column].to_numpy(dtype=int)
+            answers: Union[np.ndarray, List[List[int]]] = batch[self.answer_entity_column].to_numpy(dtype=int) if not self.multi_answers else batch[self.answer_entity_column].tolist()
+            paths: List[List[List[str, str, str]]] = batch[self.paths_column].tolist() if self.path_exists else None
+            path_keys: List[List[str]] = batch[self.path_keys_column].tolist() if self.path_key_exists else None
+            hops: List[int] = batch[self.hops_column].tolist()
+            ques_ids: List[int] = batch[self.question_number_column].tolist()
 
             # Extract questions based on the specified format
             if self.question_format == 'full_text':
-                questions: List[List[int]] = batch['Question'].tolist() # already tokenized
+                questions: List[List[int]] = batch[self.question_column].tolist() # already tokenized
             elif self.question_format == 'paraphrased':
-                questions: List[List[int]] = batch['Question-Paraphrased'] # pandas dataframe where each entry is a list of list of token ids, randomly select one paraphrase for each question
+                questions: List[List[int]] = batch[self.question_paraphrased_column] # pandas dataframe where each entry is a list of list of token ids, randomly select one paraphrase for each question
                 questions = [q[np.random.randint(0, len(q))] if isinstance(q, list) and len(q) > 0 else [] for q in questions] # handle empty paraphrase lists
             elif self.question_format == 'relation_only':
                 questions: List[List[int]] = self._relation_only_questions(paths, path_keys)
@@ -436,17 +474,17 @@ class QuestionBatcher:
 
             # Extract batch data
             batch = self.eval_df.iloc[batch_idx]
-            source_ent: np.ndarray = batch["Source-Entity"].to_numpy(dtype=int)
-            answers: Union[np.ndarray, List[List[int]]] = batch['Answer-Entity'].to_numpy(dtype=int) if not self.multi_answers else batch['Answer-Entity'].tolist()
-            paths: List[List[List[str, str, str]]] = batch['Paths'].tolist() if self.path_exists else None
-            path_keys: List[List[str]] = batch['Path-Key'].tolist() if self.path_key_exists else None
-            hops: List[int] = batch['Hops'].tolist()
-            ques_ids: List[int] = batch['Question-Number'].tolist()
+            source_ent: np.ndarray = batch[self.source_entity_column].to_numpy(dtype=int)
+            answers: Union[np.ndarray, List[List[int]]] = batch[self.answer_entity_column].to_numpy(dtype=int) if not self.multi_answers else batch[self.answer_entity_column].tolist()
+            paths: List[List[List[str, str, str]]] = batch[self.paths_column].tolist() if self.path_exists else None
+            path_keys: List[List[str]] = batch[self.path_keys_column].tolist() if self.path_key_exists else None
+            hops: List[int] = batch[self.hops_column].tolist()
+            ques_ids: List[int] = batch[self.question_number_column].tolist()
 
             # Extract questions based on the specified format
             if (self.question_format == 'full_text') or (self.question_format == 'paraphrased'):
                 # NOTE: For evaluate_paraphrases, each paraphrased questions are copied to the 'Question' column so each are evaluated independently.
-                questions: List[List[int]] = batch['Question'].tolist() # already tokenized
+                questions: List[List[int]] = batch[self.question_column].tolist() # already tokenized
             elif self.question_format == 'relation_only':
                 questions: List[List[int]] = self._relation_only_questions(paths, path_keys)
             else:  # 'graph_only'

@@ -48,13 +48,15 @@ def read_options() -> Dict[str, Any]:
     parser.add_argument("--max_num_actions", default=200, type=int,
                         help="Maximum number of relations/actions per entity in the knowledge graph")
     parser.add_argument("--use_full_graph", type=str2bool, default='True',
-                        help="Whether to use the full knowledge graph (train + test + dev) or a subgraph (train).")
+                        help="Whether to navigate using full_graph.txt instead of graph.txt. For datasets with source/filtered graph variants, True selects the source graph and False selects the filtered graph.")
     parser.add_argument("--use_directed_graph", default='False', type=str2bool,
                         help="Whether to treat the graph as directed (no inverse relations) or undirected (include inverse relations). Accepts: yes/true/t/y/1 (True) or no/false/f/n/0 (False)")
 
     # QA Dataset
     parser.add_argument("--question_format", default="full_text", type=str, choices=["full_text", "paraphrased", "relation_only", "graph_only"],
                         help="Format of the question input ('full_text', 'paraphrased', 'relation_only', 'graph_only')")
+    parser.add_argument("--reference_scope", default="released", type=str, choices=["released", "graph"], 
+                        help="Reference annotations used for answer supervision and path evaluation. 'released' uses the benchmark-released Answer-Entity and released reference paths; 'graph' uses Graph-Answer-Entity and graph-expanded reference paths when available. This option is independent of --use_full_graph.")
     parser.add_argument("--evaluate_paraphrases", default='False', type=str2bool,
                         help="Whether to evaluate on paraphrased questions instead of original text. Accepts: yes/true/t/y/1 (True) or no/false/f/n/0 (False)")
     parser.add_argument('--raw_QAData_path', type=str, default="",

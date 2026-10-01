@@ -482,6 +482,7 @@ def process_and_cache_triviaqa_data(
         "CSV file must have at least 3 columns (Question, Source-Entity, Answer-Entity)"
     
     is_multi_answer = bool(csv_df["Answer-Entity"].apply(lambda x: x.startswith('[') and x.endswith(']')).all())
+    is_multi_answer_graph = bool(csv_df["Graph-Answer-Entity"].apply(lambda x: x.startswith('[') and x.endswith(']')).all()) if "Graph-Answer-Entity" in csv_df.columns else False
 
     # Extract required columns
     question_number = csv_df["Question-Number"]
@@ -761,6 +762,7 @@ def process_and_cache_triviaqa_data(
         "hops_column": "Hops" if hops is not None else None,
         "splitLabel_column": "SplitLabel" if split_label is not None else None,
         "is_multi_answer": is_multi_answer,
+        "is_multi_answer_graph": is_multi_answer_graph,
         "cache_schema_version": QA_CACHE_SCHEMA_VERSION,
         "qa_schema": (
             "multi_reference"

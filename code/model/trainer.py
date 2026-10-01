@@ -123,6 +123,7 @@ class TrainerNLQ(object):
         data_input_dir: str,
         question_tokenizer_name: str,
         question_format: str,
+        reference_scope: str,
         cached_QAMetaData_path: str,
         raw_QAData_path: str,
         force_data_prepro: bool,
@@ -183,6 +184,7 @@ class TrainerNLQ(object):
             data_input_dir: Directory containing knowledge graph data files
             question_tokenizer_name: Tokenizer name for question embeddings
             question_format: Format of the question input ('full_text', 'relation_only', 'graph_only')
+            reference_scope: Scope of the reference annotations ('released', 'graph')
             cached_QAMetaData_path: Path to cached tokenized QA metadata JSON file
             raw_QAData_path: Path to the raw QA CSV dataset
             max_num_actions: Maximum number of relations/actions per entity
@@ -236,6 +238,7 @@ class TrainerNLQ(object):
         self.data_input_dir = data_input_dir
         self.question_tokenizer_name = question_tokenizer_name
         self.question_format = question_format
+        self.reference_scope = reference_scope
         self.cached_QAMetaData_path = cached_QAMetaData_path
         self.raw_QAData_path = raw_QAData_path
         self.evaluate_paraphrases = evaluate_paraphrases
@@ -286,6 +289,7 @@ class TrainerNLQ(object):
             data_input_dir=data_input_dir,
             question_tokenizer_name=question_tokenizer_name,
             question_format=question_format,
+            reference_scope=reference_scope,
             cached_QAMetaData_path=cached_QAMetaData_path,
             raw_QAData_path=raw_QAData_path,
             force_data_prepro=force_data_prepro,
@@ -2179,6 +2183,7 @@ if __name__ == '__main__':
             data_input_dir=options['data_input_dir'],
             question_tokenizer_name=options['question_tokenizer_name'],
             question_format=options['question_format'],
+            reference_scope=options['reference_scope'],
             cached_QAMetaData_path=options['cached_QAMetaData_path'],
             raw_QAData_path=options['raw_QAData_path'],
             force_data_prepro=options['force_data_prepro'],
@@ -2252,6 +2257,7 @@ if __name__ == '__main__':
         data_input_dir=options['data_input_dir'],
         question_tokenizer_name=options['question_tokenizer_name'],
         question_format=options['question_format'],
+        reference_scope=options['reference_scope'],
         cached_QAMetaData_path=options['cached_QAMetaData_path'],
         raw_QAData_path=options['raw_QAData_path'],
         force_data_prepro=False,  # Don't force data preprocessing during evaluation, use cached data if available

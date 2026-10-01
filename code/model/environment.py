@@ -1356,6 +1356,7 @@ class EnvNLQ(object):
         data_input_dir: str,
         question_tokenizer_name: str,
         question_format: str,
+        reference_scope: str,
         cached_QAMetaData_path: str,
         raw_QAData_path: str,
         force_data_prepro: bool,
@@ -1390,6 +1391,7 @@ class EnvNLQ(object):
             data_input_dir: Directory containing knowledge graph and question data
             question_tokenizer_name: Name/path of tokenizer for question processing
             question_format: Format of the question input ('full_text', 'relation_only', 'graph_only')
+            reference_scope: Scope of the reference annotations ('released', 'graph')
             cached_QAMetaData_path: Path to cached question-answer metadata
             raw_QAData_path: Path to raw question-answer data files
             force_data_prepro: Whether to force data preprocessing
@@ -1432,6 +1434,7 @@ class EnvNLQ(object):
             question_tokenizer_name=question_tokenizer_name,
             cached_QAMetaData_path=cached_QAMetaData_path,
             question_format=question_format,
+            reference_scope=reference_scope,
             use_weighted_hop_sampling=use_weighted_hop_sampling,
             evaluate_paraphrases=evaluate_paraphrases,
             raw_QAData_path=raw_QAData_path,
