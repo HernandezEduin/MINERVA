@@ -158,6 +158,130 @@ def row_id(row: Any, fallback: int) -> Any:
     return int(fallback)
 
 
+def question_family_fields(
+    row: Any,
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Return family metadata used for macro averaging.
+
+    When Question-Family-Size is available, each instance receives weight
+    1 / family_size. On a complete evaluation split, summing these weights
+    gives every question family total weight 1, so a weighted instance mean is
+    exactly the family-macro mean.
+
+    Question-Family-ID is retained for diagnostics and for validating that a
+    split contains complete families.
+    """
+    fields: Dict[str, Any] = {
+        "question_family_id": None,
+        "question_family_size": None,
+        "family_weight": None,
+    }
+
+    family_id_column = metadata.get("question_family_id_column")
+    if family_id_column is not None and family_id_column in row.index:
+        value = row[family_id_column]
+        if value is not None:
+            fields["question_family_id"] = value
+
+    family_size_column = metadata.get("question_family_size_column")
+    if family_size_column is not None and family_size_column in row.index:
+        value = row[family_size_column]
+        if value is not None and not (isinstance(value, float) and math.isnan(value)):
+            family_size = int(value)
+            if family_size <= 0:
+                raise ValueError(
+                    f"Invalid {family_size_column}={family_size}; expected a positive integer."
+                )
+            fields["question_family_size"] = family_size
+            fields["family_weight"] = 1.0 / float(family_size)
+
+    return fields
+
+
+def family_macro_info(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Describe whether inverse-family-size macro averaging is available."""
+    if not rows:
+        return {
+            "available": False,
+            "complete": False,
+            "weight_sum": None,
+            "num_families": None,
+        }
+
+    weights = [row.get("family_weight") for row in rows]
+    if any(weight is None or float(weight) <= 0 for weight in weights):
+        return {
+            "available": False,
+            "complete": False,
+            "weight_sum": None,
+            "num_families": None,
+        }
+
+    weight_sum = float(sum(float(weight) for weight in weights))
+    family_ids = [row.get("question_family_id") for row in rows]
+
+    # If IDs are present, verify that the current rows contain complete
+    # families. This catches debug runs such as --max-samples that cut through
+    # a family and would otherwise make inverse-family-size weighting misleading.
+    if all(family_id is not None for family_id in family_ids):
+        num_families = len(set(family_ids))
+        complete = bool(np.isclose(weight_sum, float(num_families), rtol=0.0, atol=1e-8))
+    else:
+        num_families = None
+        complete = True
+
+    return {
+        "available": bool(complete),
+        "complete": bool(complete),
+        "weight_sum": weight_sum,
+        "num_families": num_families,
+    }
+
+
+def weighted_mean_optional(
+    rows: List[Dict[str, Any]],
+    value_key: str,
+    weight_key: str = "family_weight",
+) -> Optional[float]:
+    """Compute a weighted mean while ignoring rows with unavailable values."""
+    weighted_sum = 0.0
+    weight_sum = 0.0
+
+    for row in rows:
+        value = row.get(value_key)
+        weight = row.get(weight_key)
+        if value is None or weight is None:
+            continue
+
+        value = float(value)
+        weight = float(weight)
+        if math.isnan(value) or math.isnan(weight) or weight <= 0:
+            continue
+
+        weighted_sum += value * weight
+        weight_sum += weight
+
+    if weight_sum <= 0:
+        return None
+    return float(weighted_sum / weight_sum)
+
+
+def aggregate_value(
+    rows: List[Dict[str, Any]],
+    value_key: str,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Return instance-micro and family-macro means for one per-question field."""
+    instance_micro = mean_optional(row.get(value_key) for row in rows)
+    family_info = family_macro_info(rows)
+    family_macro = (
+        weighted_mean_optional(rows, value_key)
+        if family_info["available"]
+        else None
+    )
+    return instance_micro, family_macro
+
+
 def valid_actions(
     grapher: RelationEntityGrapher,
     entity: int,
@@ -306,9 +430,30 @@ def std_optional(values: Iterable[Optional[float]]) -> Optional[float]:
 
 
 def aggregate_per_question(rows: List[Dict[str, Any]], metric_names: Sequence[str]) -> Dict[str, Any]:
-    summary: Dict[str, Any] = {"num_evaluated_questions": len(rows)}
+    """Aggregate per-question metrics at instance-micro and family-macro levels.
+
+    The historical average_<metric> keys are retained as aliases for the
+    instance-micro values. When Question-Family-Size is available on every row,
+    average_<metric>_family_macro uses inverse-family-size weighting so each
+    question family contributes total weight 1.
+    """
+    family_info = family_macro_info(rows)
+    summary: Dict[str, Any] = {
+        "num_evaluated_questions": len(rows),
+        "family_macro_available": family_info["available"],
+        "family_macro_complete": family_info["complete"],
+        "family_macro_weight_sum": family_info["weight_sum"],
+        "num_evaluated_families": family_info["num_families"],
+    }
+
     for name in metric_names:
-        summary[f"average_{name}"] = mean_optional(row.get(name) for row in rows)
+        instance_micro, family_macro = aggregate_value(rows, name)
+
+        # Backward-compatible alias.
+        summary[f"average_{name}"] = instance_micro
+        summary[f"average_{name}_instance_micro"] = instance_micro
+        summary[f"average_{name}_family_macro"] = family_macro
+
     return summary
 
 

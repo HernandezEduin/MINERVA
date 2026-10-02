@@ -28,10 +28,13 @@ The script extracts:
     F1_SG
 
 Results are grouped by dataset, answer type, navigation-graph scope,
-reference scope, baseline, and seed. This keeps the filtered/source graph
-intervention orthogonal to released/graph-expanded evaluation references.
-Legacy result files that predate reference_scope are interpreted as using
-released references.
+reference scope, aggregation level, baseline, and seed. This keeps the
+filtered/source graph intervention orthogonal to released/graph-expanded
+evaluation references and makes instance-micro versus family-macro reporting
+explicit. With --aggregation auto, complete question-family annotations use
+family-macro aggregation; datasets without them use instance-micro. Legacy
+result files that predate reference_scope are interpreted as using released
+references.
 
 For the unbiased random walk, three seed values are emitted through
 \\numstats{seed0,seed42,seed100}.
@@ -70,9 +73,9 @@ DISPLAY_ORDER = [
     ("MQuAKE-ST", "Single"),
     ("MQuAKE-ST", "Multi"),
     ("MetaQA", "Multi"),
-    ("PQ", "Multi"),
-    ("PQL", "Multi"),
-    ("WC2014", "Multi"),
+    ("PQ", "Single"),
+    ("PQL", "Single"),
+    ("WC2014", "Single"),
 ]
 
 GRAPH_SCOPE_ORDER = {
@@ -391,33 +394,70 @@ def infer_reference_scope(
 # Metric extraction
 # -------------------------------------------------------------------------
 
-def get_answer_rate(summary: Dict[str, Any]) -> Optional[float]:
-    """
-    Extract the answer-reaching rate.
+def family_macro_available(summary: Dict[str, Any]) -> bool:
+    """Return whether the baseline JSON contains complete family-macro results."""
+    if summary.get("family_macro_available") is True:
+        return True
 
-    The evaluator currently appears to store this as RW_Ans.
-
-    For random walk:
-        fraction of sampled walks that terminate at a valid answer.
-
-    For the oracle:
-        fraction of questions for which the oracle reaches a valid answer.
-
-    Multiple possible field names are supported so the script survives
-    small evaluator naming changes.
-    """
-
-    candidate_keys = (
-        "answer_rate",
-        "average_answer_rate",
-        "Ans_Rate",
-        "ans_rate",
-        "RW_Ans",
-        "rw_ans",
-        "answer_success_rate",
-        "answer_probability",
-        "answer_prob",
+    # Backward/forward compatibility for files that contain the values but not
+    # the explicit availability flag.
+    return any(
+        summary.get(f"{key}_family_macro") is not None
+        for key in (
+            "RW_Ans",
+            "answer_success_rate",
+            "average_RED",
+            "average_PED",
+            "average_F1_Rel",
+            "average_F1_SG",
+        )
     )
+
+
+def resolve_aggregation(
+    summary: Dict[str, Any],
+    requested: str,
+) -> str:
+    """Resolve auto aggregation to family-macro when family annotations exist."""
+    if requested == "auto":
+        return "family-macro" if family_macro_available(summary) else "instance-micro"
+
+    if requested == "family-macro" and not family_macro_available(summary):
+        raise ValueError(
+            "family-macro aggregation was requested, but this result does not "
+            "contain complete family-macro statistics."
+        )
+
+    return requested
+
+
+def get_answer_rate(
+    summary: Dict[str, Any],
+    aggregation: str,
+) -> Optional[float]:
+    """Extract answer reachability at the requested aggregation level."""
+    if aggregation == "family-macro":
+        candidate_keys = (
+            "RW_Ans_family_macro",
+            "answer_success_rate_family_macro",
+            "answer_rate_family_macro",
+        )
+    else:
+        candidate_keys = (
+            "RW_Ans_instance_micro",
+            "answer_success_rate_instance_micro",
+            "answer_rate_instance_micro",
+            # Legacy result keys.
+            "answer_rate",
+            "average_answer_rate",
+            "Ans_Rate",
+            "ans_rate",
+            "RW_Ans",
+            "rw_ans",
+            "answer_success_rate",
+            "answer_probability",
+            "answer_prob",
+        )
 
     for key in candidate_keys:
         if key in summary and summary[key] is not None:
@@ -429,13 +469,22 @@ def get_answer_rate(summary: Dict[str, Any]) -> Optional[float]:
 def extract_metrics(
     path: Path,
     summary: Dict[str, Any],
+    aggregation: str,
 ) -> Dict[str, Optional[float]]:
     result: Dict[str, Optional[float]] = {}
 
-    result["AnswerRate"] = get_answer_rate(summary)
+    result["AnswerRate"] = get_answer_rate(summary, aggregation)
+
+    suffix = "_family_macro" if aggregation == "family-macro" else "_instance_micro"
 
     for display_name, json_key in METRIC_KEYS.items():
-        value = summary.get(json_key)
+        explicit_key = f"{json_key}{suffix}"
+        value = summary.get(explicit_key)
+
+        # Older JSONs only stored the instance-micro value under the unsuffixed
+        # key. Never use that fallback for family-macro.
+        if value is None and aggregation == "instance-micro":
+            value = summary.get(json_key)
 
         result[display_name] = (
             float(value)
@@ -450,11 +499,13 @@ def extract_metrics(
 # Collection
 # -------------------------------------------------------------------------
 
-def collect_baselines(output_dir: Path):
+def collect_baselines(output_dir: Path, aggregation: str = "auto"):
     """
     Returns:
 
-        results[(dataset, answer_type, graph_scope, reference_scope, baseline)][seed] = metrics
+        results[
+            (dataset, answer_type, graph_scope, reference_scope, aggregation, baseline)
+        ][seed] = metrics
     """
 
     results = defaultdict(dict)
@@ -506,13 +557,23 @@ def collect_baselines(output_dir: Path):
                 summary,
             )
 
-            metrics = extract_metrics(path, summary)
+            selected_aggregation = resolve_aggregation(
+                summary,
+                aggregation,
+            )
+
+            metrics = extract_metrics(
+                path,
+                summary,
+                selected_aggregation,
+            )
 
             key = (
                 dataset,
                 answer_type,
                 graph_scope,
                 reference_scope,
+                selected_aggregation,
                 baseline,
             )
 
@@ -528,6 +589,7 @@ def collect_baselines(output_dir: Path):
                 "path": path,
                 "graph_scope": graph_scope,
                 "reference_scope": reference_scope,
+                "aggregation": selected_aggregation,
                 **metrics,
             }
 
@@ -613,15 +675,16 @@ def print_raw_group(
     answer_type,
     graph_scope,
     reference_scope,
+    aggregation,
     baseline,
     seed_results,
 ):
-    print("=" * 100)
+    print("=" * 112)
     print(
         f"{dataset} | {answer_type} | graph={graph_scope} | "
-        f"references={reference_scope} | {baseline}"
+        f"references={reference_scope} | aggregation={aggregation} | {baseline}"
     )
-    print("=" * 100)
+    print("=" * 112)
 
     available, missing, extra = validate_seed_set(
         seed_results
@@ -818,7 +881,7 @@ def oracle_latex_row(seed_results) -> str:
 # -------------------------------------------------------------------------
 
 def _result_sort_key(key):
-    dataset, answer_type, graph_scope, reference_scope, baseline = key
+    dataset, answer_type, graph_scope, reference_scope, aggregation, baseline = key
 
     try:
         dataset_order = DISPLAY_ORDER.index((dataset, answer_type))
@@ -833,6 +896,8 @@ def _result_sort_key(key):
         graph_scope,
         REFERENCE_SCOPE_ORDER.get(reference_scope, 99),
         reference_scope,
+        0 if aggregation == "family-macro" else 1,
+        aggregation,
         baseline,
     )
 
@@ -845,13 +910,14 @@ def print_compact_summary(results):
     print()
 
     for key in sorted(results, key=_result_sort_key):
-        dataset, answer_type, graph_scope, reference_scope, baseline = key
+        dataset, answer_type, graph_scope, reference_scope, aggregation, baseline = key
 
         print_raw_group(
             dataset,
             answer_type,
             graph_scope,
             reference_scope,
+            aggregation,
             baseline,
             results[key],
         )
@@ -900,10 +966,22 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--aggregation",
+        choices=["auto", "instance-micro", "family-macro"],
+        default="auto",
+        help=(
+            "Aggregation level used for Ans. Rate and path-fidelity metrics. "
+            "'auto' uses family-macro when complete question-family metadata "
+            "is available and otherwise uses instance-micro. Default: auto."
+        ),
+    )
+
     args = parser.parse_args()
 
     results = collect_baselines(
-        args.output_dir
+        args.output_dir,
+        aggregation=args.aggregation,
     )
 
     if args.graph_scope != "all" or args.reference_scope != "all":

@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from code.baselines.baseline_path_fidelity import (
     aggregate_per_question,
+    aggregate_value,
     answer_set,
     build_grapher,
     cleaned_path_and_relations,
@@ -17,6 +18,7 @@ from code.baselines.baseline_path_fidelity import (
     load_eval_frames,
     make_episode,
     metric_availability_notes,
+    question_family_fields,
     resolve_reference_scope,
     row_id,
     valid_actions,
@@ -141,6 +143,7 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
             "num_walks": args.num_walks,
             "seed": args.seed,
         }
+        per_question.update(question_family_fields(row, metadata))
         per_question.update(means)
         if args.use_ideal_paths and episode.paths_exists:
             per_question["RW_Path"] = float(np.mean(exact_path_hits)) if exact_path_hits else None
@@ -161,11 +164,19 @@ def print_summary(summary: Dict[str, Any], output_path: Optional[str]) -> None:
     print(f"Reference scope:     {summary['reference_scope']}")
     print(f"Self-loops sampled:  {summary['use_self_loops']}")
     print("-" * 88)
-    print(f"Average PED:    {format_metric(summary.get('average_PED'))}")
-    print(f"Average RED:    {format_metric(summary.get('average_RED'))}")
-    print(f"Average F1_SG:  {format_metric(summary.get('average_F1_SG'))}")
-    print(f"Average F1_Rel: {format_metric(summary.get('average_F1_Rel'))}")
-    print(f"RW-Ans:         {format_metric(summary.get('RW_Ans'))}")
+    print("Instance-micro:")
+    print(f"  Average PED:    {format_metric(summary.get('average_PED_instance_micro'))}")
+    print(f"  Average RED:    {format_metric(summary.get('average_RED_instance_micro'))}")
+    print(f"  Average F1_SG:  {format_metric(summary.get('average_F1_SG_instance_micro'))}")
+    print(f"  Average F1_Rel: {format_metric(summary.get('average_F1_Rel_instance_micro'))}")
+    print(f"  RW-Ans:         {format_metric(summary.get('RW_Ans_instance_micro'))}")
+    print("Family-macro:")
+    print(f"  Families:       {summary.get('num_evaluated_families') if summary.get('num_evaluated_families') is not None else 'n/a'}")
+    print(f"  Average PED:    {format_metric(summary.get('average_PED_family_macro'))}")
+    print(f"  Average RED:    {format_metric(summary.get('average_RED_family_macro'))}")
+    print(f"  Average F1_SG:  {format_metric(summary.get('average_F1_SG_family_macro'))}")
+    print(f"  Average F1_Rel: {format_metric(summary.get('average_F1_Rel_family_macro'))}")
+    print(f"  RW-Ans:         {format_metric(summary.get('RW_Ans_family_macro'))}")
     if summary.get("metric_availability_notes"):
         print("Metric availability notes:")
         for metric, note in summary["metric_availability_notes"].items():
@@ -208,6 +219,10 @@ def main() -> None:
         per_question.extend(evaluate_split(split_name, df, metadata, grapher, args, rng))
 
     summary = aggregate_per_question(per_question, METRIC_NAMES)
+    rw_ans_instance_micro, rw_ans_family_macro = aggregate_value(
+        per_question,
+        "answer_reached",
+    )
     summary.update({
         "baseline": "unbiased_random_walk",
         "num_walks": args.num_walks,
@@ -220,10 +235,20 @@ def main() -> None:
         "use_directed_graph": not args.include_inverse_relations,
         "path_segment_policy": args.path_segment_policy,
         "metric_availability_notes": metric_availability_notes(metadata, args.reference_scope),
-        "RW_Ans": float(np.mean([row["answer_reached"] for row in per_question])) if per_question else None,
+
+        # Backward-compatible alias: historically RW_Ans was instance-micro.
+        "RW_Ans": rw_ans_instance_micro,
+        "RW_Ans_instance_micro": rw_ans_instance_micro,
+        "RW_Ans_family_macro": rw_ans_family_macro,
     })
     if args.use_ideal_paths and per_question and "RW_Path" in per_question[0]:
-        summary["RW_Path"] = float(np.mean([row["RW_Path"] for row in per_question if row.get("RW_Path") is not None]))
+        rw_path_instance_micro, rw_path_family_macro = aggregate_value(
+            per_question,
+            "RW_Path",
+        )
+        summary["RW_Path"] = rw_path_instance_micro
+        summary["RW_Path_instance_micro"] = rw_path_instance_micro
+        summary["RW_Path_family_macro"] = rw_path_family_macro
 
     payload = {"summary": summary, "per_question": per_question}
     output_path = write_results(args.output, args.output_format, payload)

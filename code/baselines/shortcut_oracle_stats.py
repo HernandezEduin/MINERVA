@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from code.baselines.baseline_path_fidelity import (
     aggregate_per_question,
+    aggregate_value,
     answer_set,
     build_grapher,
     compute_path_fidelity,
@@ -16,6 +17,7 @@ from code.baselines.baseline_path_fidelity import (
     load_eval_frames,
     make_episode,
     metric_availability_notes,
+    question_family_fields,
     resolve_reference_scope,
     row_id,
     shortest_path_to_answer,
@@ -121,6 +123,7 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
             per_question["shortest_to_reference_length_ratio"] = float(shortest_len) / float(reference_len)
         else:
             per_question["shortest_to_reference_length_ratio"] = None
+        per_question.update(question_family_fields(row, metadata))
         per_question.update(metrics)
         rows.append(per_question)
 
@@ -134,17 +137,25 @@ def print_summary(summary: Dict[str, Any], output_path: str) -> None:
     print(f"Evaluated questions:            {summary['num_evaluated_questions']}")
     print(f"Reference scope:                {summary['reference_scope']}")
     print(f"Missing-path questions:         {summary['missing_path_count']} ({format_metric(summary['missing_path_rate'])})")
-    print(f"Answer success rate:            {format_metric(summary['answer_success_rate'])}")
+    print(f"Answer success rate (micro):    {format_metric(summary['answer_success_rate_instance_micro'])}")
+    print(f"Answer success rate (family):   {format_metric(summary['answer_success_rate_family_macro'])}")
     print(f"Average shortest-path length:   {format_metric(summary['average_shortest_path_length'])}")
     print(f"Average reference-path length:  {format_metric(summary['average_reference_path_length'])}")
     print(f"Average shortest/ref ratio:     {format_metric(summary['average_shortest_to_reference_length_ratio'])}")
     print(f"Exact reference-path matches:   {summary['exact_match_count']} ({format_metric(summary['exact_match_rate'])})")
     print(f"Correct answer, different path: {summary['different_path_success_count']} ({format_metric(summary['different_path_success_rate'])})")
     print("-" * 88)
-    print(f"Average PED:    {format_metric(summary.get('average_PED'))}")
-    print(f"Average RED:    {format_metric(summary.get('average_RED'))}")
-    print(f"Average F1_SG:  {format_metric(summary.get('average_F1_SG'))}")
-    print(f"Average F1_Rel: {format_metric(summary.get('average_F1_Rel'))}")
+    print("Instance-micro path fidelity:")
+    print(f"  Average PED:    {format_metric(summary.get('average_PED_instance_micro'))}")
+    print(f"  Average RED:    {format_metric(summary.get('average_RED_instance_micro'))}")
+    print(f"  Average F1_SG:  {format_metric(summary.get('average_F1_SG_instance_micro'))}")
+    print(f"  Average F1_Rel: {format_metric(summary.get('average_F1_Rel_instance_micro'))}")
+    print("Family-macro path fidelity:")
+    print(f"  Families:       {summary.get('num_evaluated_families') if summary.get('num_evaluated_families') is not None else 'n/a'}")
+    print(f"  Average PED:    {format_metric(summary.get('average_PED_family_macro'))}")
+    print(f"  Average RED:    {format_metric(summary.get('average_RED_family_macro'))}")
+    print(f"  Average F1_SG:  {format_metric(summary.get('average_F1_SG_family_macro'))}")
+    print(f"  Average F1_Rel: {format_metric(summary.get('average_F1_Rel_family_macro'))}")
     if summary.get("metric_availability_notes"):
         print("Metric availability notes:")
         for metric, note in summary["metric_availability_notes"].items():
@@ -187,6 +198,10 @@ def main() -> None:
     n = len(per_question)
     missing = sum(1 for row in per_question if row["predicted_path_length"] is None)
     successes = sum(1 for row in per_question if row["answer_reached"])
+    answer_success_instance_micro, answer_success_family_macro = aggregate_value(
+        per_question,
+        "answer_reached",
+    )
     exact_matches = sum(1 for row in per_question if row["exact_reference_match"] is True)
     different_successes = sum(1 for row in per_question if row["reaches_answer_different_path"])
 
@@ -204,7 +219,11 @@ def main() -> None:
         "self_loops_ignored_by_search": True,
         "tie_breaking": "BFS with outgoing actions sorted by (relation_id, target_entity_id)",
         "metric_availability_notes": metric_availability_notes(metadata, args.reference_scope),
-        "answer_success_rate": float(successes / n) if n else None,
+        # Backward-compatible alias: historically answer_success_rate was
+        # instance-micro.
+        "answer_success_rate": answer_success_instance_micro,
+        "answer_success_rate_instance_micro": answer_success_instance_micro,
+        "answer_success_rate_family_macro": answer_success_family_macro,
         "missing_path_count": missing,
         "missing_path_rate": float(missing / n) if n else None,
         "average_shortest_path_length": float(np.mean(shortest_lengths)) if shortest_lengths else None,
