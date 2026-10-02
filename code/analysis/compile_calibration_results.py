@@ -27,6 +27,12 @@ The script extracts:
     F1_Rel
     F1_SG
 
+Results are grouped by dataset, answer type, navigation-graph scope,
+reference scope, baseline, and seed. This keeps the filtered/source graph
+intervention orthogonal to released/graph-expanded evaluation references.
+Legacy result files that predate reference_scope are interpreted as using
+released references.
+
 For the unbiased random walk, three seed values are emitted through
 \\numstats{seed0,seed42,seed100}.
 
@@ -64,10 +70,23 @@ DISPLAY_ORDER = [
     ("MQuAKE-ST", "Single"),
     ("MQuAKE-ST", "Multi"),
     ("MetaQA", "Multi"),
-    ("PQ", "Single"),
-    ("PQL", "Single"),
-    ("WC2014", "Single")
+    ("PQ", "Multi"),
+    ("PQL", "Multi"),
+    ("WC2014", "Multi"),
 ]
+
+GRAPH_SCOPE_ORDER = {
+    "filtered": 0,
+    "source": 1,
+    "full": 2,
+    "unknown": 99,
+}
+
+REFERENCE_SCOPE_ORDER = {
+    "released": 0,
+    "graph": 1,
+    "unknown": 99,
+}
 
 
 # -------------------------------------------------------------------------
@@ -305,6 +324,69 @@ def normalize_baseline(
     return summary.get("baseline", path.stem)
 
 
+def infer_graph_scope(
+    path: Path,
+    summary: Dict[str, Any],
+    dataset: str,
+) -> str:
+    """Infer the navigation graph used by a baseline result.
+
+    For PQ/PQL, ``full_graph.txt`` corresponds to the source graph and
+    ``graph.txt`` to the filtered graph. For other datasets we retain the
+    generic ``full`` / ``filtered`` terminology. Filename tokens are used as
+    fallbacks for older result files.
+    """
+
+    path_text = str(path).lower()
+    graph_value = str(summary.get("graph", "")).lower()
+
+    # Prefer explicit source/filtered tokens in the filename/path when present.
+    if re.search(r"(?:^|[/_\-])source(?:[/_\-.]|$)", path_text):
+        return "source"
+    if re.search(r"(?:^|[/_\-])filtered(?:[/_\-.]|$)", path_text):
+        return "filtered"
+
+    if "full_graph" in graph_value or graph_value.endswith("full_graph.txt"):
+        return "source" if dataset in {"PQ", "PQL"} else "full"
+
+    if graph_value.endswith("graph.txt") or graph_value == "graph.txt":
+        return "filtered"
+
+    return "unknown"
+
+
+def infer_reference_scope(
+    path: Path,
+    summary: Dict[str, Any],
+) -> str:
+    """Infer released vs graph-expanded reference annotations.
+
+    New baseline outputs store ``reference_scope`` directly. Older outputs did
+    not have this field and are therefore treated as ``released``, matching the
+    pre-reference-scope evaluator behavior. Filename tokens are used as a
+    fallback for newly named result files whose summary metadata is incomplete.
+    """
+
+    value = summary.get("reference_scope")
+    if value is not None:
+        value = str(value).lower()
+        if value in {"released", "graph"}:
+            return value
+        raise ValueError(
+            f"Unsupported reference_scope={value!r} in {path}"
+        )
+
+    name = path.stem.lower()
+    if re.search(r"(?:^|[_\-])graph(?:[_\-]|$)", name):
+        return "graph"
+    if re.search(r"(?:^|[_\-])released(?:[_\-]|$)", name):
+        return "released"
+
+    # Backward compatibility: before reference_scope existed, all baseline
+    # answer/path evaluation used the released benchmark annotations.
+    return "released"
+
+
 # -------------------------------------------------------------------------
 # Metric extraction
 # -------------------------------------------------------------------------
@@ -332,6 +414,7 @@ def get_answer_rate(summary: Dict[str, Any]) -> Optional[float]:
         "ans_rate",
         "RW_Ans",
         "rw_ans",
+        "answer_success_rate",
         "answer_probability",
         "answer_prob",
     )
@@ -371,7 +454,7 @@ def collect_baselines(output_dir: Path):
     """
     Returns:
 
-        results[(dataset, answer_type, baseline)][seed] = metrics
+        results[(dataset, answer_type, graph_scope, reference_scope, baseline)][seed] = metrics
     """
 
     results = defaultdict(dict)
@@ -412,11 +495,24 @@ def collect_baselines(output_dir: Path):
                 dataset,
             )
 
+            graph_scope = infer_graph_scope(
+                path,
+                summary,
+                dataset,
+            )
+
+            reference_scope = infer_reference_scope(
+                path,
+                summary,
+            )
+
             metrics = extract_metrics(path, summary)
 
             key = (
                 dataset,
                 answer_type,
+                graph_scope,
+                reference_scope,
                 baseline,
             )
 
@@ -430,6 +526,8 @@ def collect_baselines(output_dir: Path):
 
             results[key][seed] = {
                 "path": path,
+                "graph_scope": graph_scope,
+                "reference_scope": reference_scope,
                 **metrics,
             }
 
@@ -513,12 +611,15 @@ def validate_seed_set(seed_results, expected=SEED_ORDER):
 def print_raw_group(
     dataset,
     answer_type,
+    graph_scope,
+    reference_scope,
     baseline,
     seed_results,
 ):
     print("=" * 100)
     print(
-        f"{dataset} | {answer_type} | {baseline}"
+        f"{dataset} | {answer_type} | graph={graph_scope} | "
+        f"references={reference_scope} | {baseline}"
     )
     print("=" * 100)
 
@@ -716,6 +817,26 @@ def oracle_latex_row(seed_results) -> str:
 # Optional compact summary
 # -------------------------------------------------------------------------
 
+def _result_sort_key(key):
+    dataset, answer_type, graph_scope, reference_scope, baseline = key
+
+    try:
+        dataset_order = DISPLAY_ORDER.index((dataset, answer_type))
+    except ValueError:
+        dataset_order = len(DISPLAY_ORDER)
+
+    return (
+        dataset_order,
+        dataset,
+        answer_type,
+        GRAPH_SCOPE_ORDER.get(graph_scope, 99),
+        graph_scope,
+        REFERENCE_SCOPE_ORDER.get(reference_scope, 99),
+        reference_scope,
+        baseline,
+    )
+
+
 def print_compact_summary(results):
     print("\n")
     print("#" * 100)
@@ -723,12 +844,14 @@ def print_compact_summary(results):
     print("#" * 100)
     print()
 
-    for key in sorted(results):
-        dataset, answer_type, baseline = key
+    for key in sorted(results, key=_result_sort_key):
+        dataset, answer_type, graph_scope, reference_scope, baseline = key
 
         print_raw_group(
             dataset,
             answer_type,
+            graph_scope,
+            reference_scope,
             baseline,
             results[key],
         )
@@ -757,11 +880,44 @@ def main():
         ),
     )
 
+    parser.add_argument(
+        "--graph-scope",
+        choices=["all", "filtered", "source", "full", "unknown"],
+        default="all",
+        help=(
+            "Optionally restrict results to one navigation-graph scope. "
+            "Default: all."
+        ),
+    )
+
+    parser.add_argument(
+        "--reference-scope",
+        choices=["all", "released", "graph", "unknown"],
+        default="all",
+        help=(
+            "Optionally restrict results to released or graph-expanded "
+            "references. Default: all."
+        ),
+    )
+
     args = parser.parse_args()
 
     results = collect_baselines(
         args.output_dir
     )
+
+    if args.graph_scope != "all" or args.reference_scope != "all":
+        results = {
+            key: value
+            for key, value in results.items()
+            if (
+                (args.graph_scope == "all" or key[2] == args.graph_scope)
+                and (
+                    args.reference_scope == "all"
+                    or key[3] == args.reference_scope
+                )
+            )
+        }
 
     if not results:
         raise RuntimeError(
