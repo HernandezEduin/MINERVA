@@ -1,0 +1,43 @@
+# Training configuration for PQ dataset (n-hop QA)
+
+base_output_dir: "output/pq/"
+batch_size: 64
+test_batch_size: 128
+beta: 0.28
+data_input_dir: "datasets/nlq/pq/"
+embedding_size: 50
+eval_every: 100
+gamma: 1.00
+hidden_size: 200
+Lambda: 0.02
+learning_rate: 0.0005
+max_num_actions: 200
+num_rollouts: 10
+test_rollouts: 100
+total_iterations: 15000
+train_entity_embeddings: True
+train_relation_embeddings: True
+print_predictions: False
+question_tokenizer_name: "bert-base-uncased"
+use_beam: True
+use_entity_embeddings: True
+vocab_dir: "${data_input_dir}vocab"
+
+# Recommended variables to tune
+seed: 42
+use_full_graph: True
+use_directed_graph: True
+path_length: 3
+question_format: "full_text"
+evaluate_paraphrases: False
+raw_QAData_path: "${data_input_dir}/pq_source_qa_nhop.csv"
+cached_QAMetaData_path: "./.cache/itl/pq_source_qa_nhop.json"
+print_paths: True
+load_model: False
+timestamp: "sc_qa_nhop_reason_${path_length}hop_seed${seed}"
+
+# WANDB settings (OPTIONAL, use only during training)
+wandb_project: "pq-minerva"
+wandb_name: "sc_qa_nhop_reason_${path_length}hop_seed${seed}"
+wandb_tags: ["PQ", "${path_length}-hop", "Directed Graph", "Mix-hop", "Multi Answer", "Source Graph"]
+track: True
