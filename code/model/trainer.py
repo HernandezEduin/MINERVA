@@ -163,6 +163,7 @@ class TrainerNLQ(object):
         stop_signal_penalty: float = -0.5,
         length_penalty: float = 0.0,
         path_segment_policy: str = "raw",
+        evaluation_aggregation: str = "instance_micro",
         use_wandb: bool = False
     ) -> None:
         """
@@ -273,6 +274,12 @@ class TrainerNLQ(object):
         self.stop_signal_penalty = stop_signal_penalty
         self.length_penalty = length_penalty
         self.path_segment_policy = path_segment_policy
+        self.evaluation_aggregation = evaluation_aggregation
+        if self.evaluation_aggregation not in {"instance_micro", "family_macro"}:
+            raise ValueError(
+                f"Invalid evaluation_aggregation={self.evaluation_aggregation!r}; "
+                "expected 'instance_micro' or 'family_macro'."
+            )
 
         # Debug logging for WANDB
         logger.info(f"Trainer initialized with use_wandb={self.use_wandb}")
@@ -990,6 +997,9 @@ class TrainerNLQ(object):
             overall_rel_edit_distance = None
 
         mrr = 0                         # Overall results for MRR
+        evaluation_weight_sum = 0.0
+        evaluation_family_ids = set()
+        family_ids_available = None
 
         # Changing the environment to test/dev data and resetting values
         self.environment.change_mode(mode)
@@ -1006,6 +1016,32 @@ class TrainerNLQ(object):
 
             temp_batch_size = episode.no_examples                   # batch size, can vary in test due to the last batch
             test_batch_counter += temp_batch_size
+
+            if self.evaluation_aggregation == "family_macro":
+                if episode.question_family_sizes is None:
+                    raise ValueError(
+                        "family_macro evaluation requires Question-Family-Size in the QA dataset. "
+                        "Reprocess the QA cache with --force_data_prepro if needed."
+                    )
+                family_sizes = np.asarray(episode.question_family_sizes, dtype=np.float64)
+                if family_sizes.shape[0] != temp_batch_size or np.any(~np.isfinite(family_sizes)) or np.any(family_sizes <= 0):
+                    raise ValueError("Question-Family-Size must contain one positive finite value per evaluation question.")
+                question_weights = 1.0 / family_sizes
+
+                current_ids_available = episode.question_family_ids is not None
+                if family_ids_available is None:
+                    family_ids_available = current_ids_available
+                elif family_ids_available != current_ids_available:
+                    raise ValueError("Question-Family-ID availability changed across evaluation batches.")
+
+                if current_ids_available:
+                    if len(episode.question_family_ids) != temp_batch_size:
+                        raise ValueError("Question-Family-ID must contain one value per evaluation question.")
+                    evaluation_family_ids.update(episode.question_family_ids)
+            else:
+                question_weights = np.ones(temp_batch_size, dtype=np.float64)
+
+            evaluation_weight_sum += float(question_weights.sum())
             logger.info(f"Evaluating samples {test_batch_counter}/{total_examples} with {effective_rollouts} rollouts...")
 
             # Set Initial Beams Probs
@@ -1145,9 +1181,9 @@ class TrainerNLQ(object):
             all_final_path_entropy += self.entropies.mean(axis=1).sum(axis=0) # Average entropy per step across all questions and beams
 
             precision, recall, f1_score = episode.get_multi_answer_coverage()
-            all_final_answer_recall += recall.sum()
-            all_final_answer_precision += precision.sum()
-            all_final_answer_f1 += f1_score.sum()
+            all_final_answer_recall += float(np.dot(recall, question_weights))
+            all_final_answer_precision += float(np.dot(precision, question_weights))
+            all_final_answer_f1 += float(np.dot(f1_score, question_weights))
 
             if self.use_stop_signal:
                 stop_rate, correct_stop_rate, incorrect_stop_rate, hit_without_stop_rate = episode.get_stop_quality(answer_hits)
@@ -1176,11 +1212,12 @@ class TrainerNLQ(object):
             
             # Evaluate each sample/question's performance
             for b in range(temp_batch_size):
+                sample_weight = float(question_weights[b])
                 answer_pos = None
                 seen = set()
                 pos = 0
                 gt_hop = episode.get_path_length(b)
-                all_hop_count[gt_hop] += 1
+                all_hop_count[gt_hop] += sample_weight
 
                 if self.pool == 'max':          # Evaluation done based on best performing rollout
                     for r in sorted_indx[b]:    # Go through paths sorted by score (highest first)
@@ -1206,19 +1243,19 @@ class TrainerNLQ(object):
 
                 # Evaluate the answer position
                 if answer_pos is not None:
-                    final_mrr += 1.0/((answer_pos+1))
-                    all_hop_mrr[gt_hop] += 1.0/((answer_pos+1))
+                    final_mrr += sample_weight * (1.0/((answer_pos+1)))
+                    all_hop_mrr[gt_hop] += sample_weight * (1.0/((answer_pos+1)))
                     if answer_pos < 20:
-                        final_reward_20 += 1
+                        final_reward_20 += sample_weight
                         if answer_pos < 10:
-                            final_reward_10 += 1
+                            final_reward_10 += sample_weight
                             if answer_pos < 5:
-                                final_reward_5 += 1
+                                final_reward_5 += sample_weight
                                 if answer_pos < 3:
-                                    final_reward_3 += 1
+                                    final_reward_3 += sample_weight
                                     if answer_pos < 1:
-                                        final_reward_1 += 1
-                                        all_hop_accuracy[gt_hop] += 1
+                                        final_reward_1 += sample_weight
+                                        all_hop_accuracy[gt_hop] += sample_weight
                 else:
                     final_mrr += 0
                     all_hop_mrr[gt_hop] += 0
@@ -1274,20 +1311,20 @@ class TrainerNLQ(object):
 
                 if self.environment.has_paths():   # If path existence checking is enabled
                     precision, recall, f1_score = episode.get_subgraph_overlap(merged_path, b)
-                    all_final_path_precision += precision
-                    all_final_path_recall += recall
-                    all_final_path_f1 += f1_score
+                    all_final_path_precision += sample_weight * precision
+                    all_final_path_recall += sample_weight * recall
+                    all_final_path_f1 += sample_weight * f1_score
                     path_f1 = f1_score
 
                     precision, recall, f1_score = episode.get_node_coverage(entities_path, b)
-                    all_final_node_precision += precision
-                    all_final_node_recall += recall
-                    all_final_node_f1 += f1_score
+                    all_final_node_precision += sample_weight * precision
+                    all_final_node_recall += sample_weight * recall
+                    all_final_node_f1 += sample_weight * f1_score
 
                     ed_dist = episode.get_path_edit_distance(merged_path, b)
-                    all_edit_distance[gt_hop] += ed_dist
-                    all_path_hop_count[gt_hop] += 1
-                    all_path_metric_examples += 1
+                    all_edit_distance[gt_hop] += sample_weight * ed_dist
+                    all_path_hop_count[gt_hop] += sample_weight
+                    all_path_metric_examples += sample_weight
                 elif reconstruct_reference_path:
                     # Test-only multi-answer PED/F1_SG against all semantically valid
                     # entity-level paths generated from the Path-Key relation chain.
@@ -1295,24 +1332,24 @@ class TrainerNLQ(object):
                     ed_dist = episode.get_reconstructed_path_edit_distance(merged_path, b)
                     if overlap_scores is not None and ed_dist is not None:
                         precision, recall, f1_score = overlap_scores
-                        all_final_path_precision += precision
-                        all_final_path_recall += recall
-                        all_final_path_f1 += f1_score
+                        all_final_path_precision += sample_weight * precision
+                        all_final_path_recall += sample_weight * recall
+                        all_final_path_f1 += sample_weight * f1_score
                         path_f1 = f1_score
 
-                        all_edit_distance[gt_hop] += ed_dist
-                        all_path_hop_count[gt_hop] += 1
-                        all_path_metric_examples += 1
+                        all_edit_distance[gt_hop] += sample_weight * ed_dist
+                        all_path_hop_count[gt_hop] += sample_weight
+                        all_path_metric_examples += sample_weight
                 
                 if self.environment.has_paths_or_keys():   # If relation path existence checking is enabled
                     precision, recall, f1_score = episode.get_relation_coverage(relations_path, b)
-                    all_final_rel_precision += precision
-                    all_final_rel_recall += recall
-                    all_final_rel_f1 += f1_score
+                    all_final_rel_precision += sample_weight * precision
+                    all_final_rel_recall += sample_weight * recall
+                    all_final_rel_f1 += sample_weight * f1_score
                     rel_f1 = f1_score
 
                     ed_rel_dist = episode.get_relation_edit_distance(relations_path, b)
-                    all_rel_edit_distance[gt_hop] += ed_rel_dist
+                    all_rel_edit_distance[gt_hop] += sample_weight * ed_rel_dist
                 
                 # Comprehensive reasoning path report
                 if print_paths:
@@ -1390,13 +1427,27 @@ class TrainerNLQ(object):
             all_final_reward_20 += final_reward_20
             mrr += final_mrr
 
-        # Update total rewards
-        all_final_reward_1 /= total_examples
-        all_final_reward_3 /= total_examples
-        all_final_reward_5 /= total_examples
-        all_final_reward_10 /= total_examples
-        all_final_reward_20 /= total_examples
-        mrr /= total_examples
+        # Validate family completeness before reporting a family-macro mean.
+        if self.evaluation_aggregation == "family_macro" and family_ids_available:
+            num_families = len(evaluation_family_ids)
+            if not np.isclose(evaluation_weight_sum, float(num_families), rtol=0.0, atol=1e-8):
+                raise ValueError(
+                    "family_macro evaluation requires complete question families in the selected split: "
+                    f"inverse-size weights sum to {evaluation_weight_sum:.8f}, "
+                    f"but {num_families} distinct Question-Family-ID values were observed."
+                )
+
+        evaluation_denominator = evaluation_weight_sum
+        if evaluation_denominator <= 0:
+            raise ValueError("Evaluation aggregation produced a non-positive total weight.")
+
+        # Update total rewards using the selected question-level aggregation.
+        all_final_reward_1 /= evaluation_denominator
+        all_final_reward_3 /= evaluation_denominator
+        all_final_reward_5 /= evaluation_denominator
+        all_final_reward_10 /= evaluation_denominator
+        all_final_reward_20 /= evaluation_denominator
+        mrr /= evaluation_denominator
 
         for i0 in all_hop_accuracy.keys():
             all_hop_accuracy[i0] /= all_hop_count[i0]
@@ -1416,9 +1467,9 @@ class TrainerNLQ(object):
 
         all_final_segment_hops /= total_examples
 
-        all_final_answer_recall /= total_examples
-        all_final_answer_precision /= total_examples
-        all_final_answer_f1 /= total_examples
+        all_final_answer_recall /= evaluation_denominator
+        all_final_answer_precision /= evaluation_denominator
+        all_final_answer_f1 /= evaluation_denominator
         
         if self.use_stop_signal:
             all_final_termination_rollouts /= total_examples
@@ -1463,14 +1514,14 @@ class TrainerNLQ(object):
             path_metrics_reportable = False
 
         if self.environment.has_paths():
-            all_final_node_recall /= total_examples
-            all_final_node_precision /= total_examples
-            all_final_node_f1 /= total_examples
+            all_final_node_recall /= evaluation_denominator
+            all_final_node_precision /= evaluation_denominator
+            all_final_node_f1 /= evaluation_denominator
         
         if self.environment.has_paths_or_keys():
-            all_final_rel_recall /= total_examples
-            all_final_rel_precision /= total_examples
-            all_final_rel_f1 /= total_examples
+            all_final_rel_recall /= evaluation_denominator
+            all_final_rel_precision /= evaluation_denominator
+            all_final_rel_f1 /= evaluation_denominator
 
             overall_rel_edit_distance = sum(all_rel_edit_distance.values()) / sum(all_hop_count.values())
             for hop in all_rel_edit_distance.keys():
@@ -1507,7 +1558,7 @@ class TrainerNLQ(object):
                     # pos_file.write("\n")
 
         with open(os.path.join(self.output_dir, 'scores.txt'), 'a') as score_file:
-            score_file.write("Answer Metrics\n")
+            score_file.write(f"Answer Metrics ({self.evaluation_aggregation})\n")
             score_file.write(f"\tHits@1: {all_final_reward_1:7.4f}\n")
             score_file.write(f"\tHits@3: {all_final_reward_3:7.4f}\n")
             score_file.write(f"\tHits@5: {all_final_reward_5:7.4f}\n")
@@ -1600,7 +1651,7 @@ class TrainerNLQ(object):
 
             score_file.write("\n") 
 
-        logger.info("Answer Metrics:")
+        logger.info(f"Answer Metrics ({self.evaluation_aggregation}):")
         logger.info(f"\tHits@1: {all_final_reward_1:7.4f}")
         logger.info(f"\tHits@3: {all_final_reward_3:7.4f}")
         logger.info(f"\tHits@5: {all_final_reward_5:7.4f}")
@@ -2222,6 +2273,7 @@ if __name__ == '__main__':
             length_penalty=options['length_penalty'],
             use_restart_signal=options['use_restart_signal'],
             path_segment_policy=options['path_segment_policy'],
+            evaluation_aggregation=options['evaluation_aggregation'],
             embedding_server=embedding_server,
             use_wandb=options.get('track', False)
         )
@@ -2296,6 +2348,7 @@ if __name__ == '__main__':
         stop_signal_penalty=options['stop_signal_penalty'],
         length_penalty=options['length_penalty'],
         path_segment_policy=options['path_segment_policy'],
+        evaluation_aggregation=options['evaluation_aggregation'],
         embedding_server=embedding_server,
         use_wandb=options.get('track', False)  # Enable WANDB for evaluation if tracking is on
     )

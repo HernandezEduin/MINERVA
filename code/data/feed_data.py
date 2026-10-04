@@ -114,6 +114,8 @@ class QuestionBatcher:
         self.question_column = self.train_metadata.get("question_column")
         self.question_paraphrased_column = self.train_metadata.get("question_paraphrased_column")
         self.question_number_column = self.train_metadata.get("question_number_column")
+        self.question_family_id_column = self.train_metadata.get("question_family_id_column")
+        self.question_family_size_column = self.train_metadata.get("question_family_size_column")
         self.source_label_column = self.train_metadata.get("source_label_column")
         self.source_entity_column = self.train_metadata.get("source_entities_column")
         self.hops_column = self.train_metadata.get("hops_column")
@@ -480,6 +482,14 @@ class QuestionBatcher:
             path_keys: List[List[str]] = batch[self.path_keys_column].tolist() if self.path_key_exists else None
             hops: List[int] = batch[self.hops_column].tolist()
             ques_ids: List[int] = batch[self.question_number_column].tolist()
+            family_ids = (
+                batch[self.question_family_id_column].tolist()
+                if self.question_family_id_column is not None else None
+            )
+            family_sizes = (
+                batch[self.question_family_size_column].tolist()
+                if self.question_family_size_column is not None else None
+            )
 
             # Extract questions based on the specified format
             if (self.question_format == 'full_text') or (self.question_format == 'paraphrased'):
@@ -492,7 +502,7 @@ class QuestionBatcher:
                 questions: List[List[int]] = self.tokenize_questions([""] * len(batch)) 
                 question_embeddings = np.zeros((len(questions), self.get_embedding_dim()), dtype=np.float32)
 
-                yield questions, question_embeddings, source_ent, answers, paths, path_keys, hops, ques_ids
+                yield questions, question_embeddings, source_ent, answers, paths, path_keys, hops, ques_ids, family_ids, family_sizes
                 continue # skip embedding generation
 
             # Generate embeddings via the embedding server
@@ -504,7 +514,7 @@ class QuestionBatcher:
                 max_length=128,
             )
 
-            yield questions, question_embeddings, source_ent, answers, paths, path_keys, hops, ques_ids
+            yield questions, question_embeddings, source_ent, answers, paths, path_keys, hops, ques_ids, family_ids, family_sizes
 
     def translate_entities(self, entity_ids: np.ndarray, dynamic_list: bool = False) -> List[str]:
         """

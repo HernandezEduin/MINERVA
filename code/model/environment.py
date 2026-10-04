@@ -101,6 +101,8 @@ class EpisodeNLQ(object):
         paths: Optional[List[List[Tuple[int, int, int]]]] = None,
         path_keys: Optional[List[List[int]]] = None,
         path_hops: Optional[List[int]] = None,
+        question_family_ids: Optional[List[Any]] = None,
+        question_family_sizes: Optional[List[int]] = None,
     ) -> None:
         """
         Initialize a reinforcement learning episode for knowledge graph reasoning.
@@ -144,6 +146,8 @@ class EpisodeNLQ(object):
         self.paths_exists = paths is not None
         self.path_key_exists = path_keys is not None
         self.path_hops = path_hops
+        self.question_family_ids = question_family_ids
+        self.question_family_sizes = question_family_sizes
         self._semantic_valid_path_cache: Dict[int, List[List[Tuple[int, int, int]]]] = {}
         self.current_hop = 0
         self.no_examples = start_entities.shape[0]
@@ -1509,7 +1513,7 @@ class EnvNLQ(object):
             for data in self.batcher.yield_next_batch_test():
                 if data == None:
                     return
-                question_tokens, question_embeddings, start_entities, end_entities, paths, path_keys, hops, ques_ids = data
+                question_tokens, question_embeddings, start_entities, end_entities, paths, path_keys, hops, ques_ids, family_ids, family_sizes = data
                 yield EpisodeNLQ(
                     self.grapher, 
                     question_tokens,
@@ -1526,6 +1530,8 @@ class EnvNLQ(object):
                     paths=paths,
                     path_keys=path_keys,
                     path_hops=hops,
+                    question_family_ids=family_ids,
+                    question_family_sizes=family_sizes,
                 )
 
     def change_mode(self, mode: str) -> None:

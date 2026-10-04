@@ -141,6 +141,9 @@ def read_options() -> Dict[str, Any]:
                         help="Pooling method for Evaluation of Rollouts ('max', 'sum')")
     parser.add_argument("--use_beam", default='False', type=str2bool,
                         help="Whether to use beam search during decoding. Accepts: yes/true/t/y/1 (True) or no/false/f/n/0 (False)")
+    parser.add_argument("--evaluation_aggregation", default="instance_micro", type=str,
+                        choices=["instance_micro", "family_macro"],
+                        help="Question-level evaluation aggregation. 'instance_micro' gives every question equal weight (default); 'family_macro' weights each question by 1 / Question-Family-Size so every complete question family contributes equally.")
     parser.add_argument("--path_segment_policy", default="final_segment_truncate", choices=["raw", "truncate_at_stop", "final_segment", "final_segment_truncate"], 
                         help="Policy for handling path segments in evaluation. 'raw' uses the full path as is. 'truncate_at_stop' truncates the path at the first STOP action (if use_stop_signal is True). 'final_segment' uses only the final segment of the path after the last restart (if use_restart_signal is True). 'final_segment_truncate' uses the final segment but also truncates at STOP if it exists.")
     parser.add_argument("--print_paths", default='False', type=str2bool,
