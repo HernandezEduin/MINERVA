@@ -130,6 +130,7 @@ if __name__ == '__main__':
         stop_signal_penalty=options['stop_signal_penalty'],
         length_penalty=options['length_penalty'],
         path_segment_policy=options['path_segment_policy'],
+        evaluation_aggregation=options['evaluation_aggregation'],
         embedding_server=embedding_server,
         use_wandb=False  # Do not use WANDB for Evaluation
     )
