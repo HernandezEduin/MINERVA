@@ -515,7 +515,7 @@ def process_and_cache_triviaqa_data(
         paths = None
 
     graph_multi_paths = (
-        extract_literals(csv_df["Graph-Multi-Paths"])
+        extract_literals(csv_df["Graph-Multi-Paths"]).map(_flatten_reference_paths)
         if "Graph-Multi-Paths" in csv_df.columns
         else None
     )
