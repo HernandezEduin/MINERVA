@@ -8,13 +8,20 @@ import argparse
 import json
 from pathlib import Path
 
+from code.model.evidence.annotations import get_evidence_paths
 from code.model.evidence.metrics import evaluate_evidence
 from code.model.evidence.retrieval import build_evidence_subgraph
 
 
 def evaluate_record(record: dict, top_k: int) -> dict:
-    if "gold_paths" not in record or "trajectories" not in record:
-        raise ValueError("Every record needs trajectories and gold_paths")
+    if "trajectories" not in record:
+        raise ValueError("Every record needs decoded trajectories")
+    if "Path" in record or "Multi-Paths" in record:
+        gold_annotations = get_evidence_paths(record)
+    else:
+        gold_annotations = record.get("gold_paths")
+        if gold_annotations is None:
+            raise ValueError("Every record needs Path or Multi-Paths evidence")
     subgraph = build_evidence_subgraph(
         record["trajectories"],
         record.get("scores"),
@@ -29,7 +36,7 @@ def evaluate_record(record: dict, top_k: int) -> dict:
     from code.model.evidence.retrieval import canonical_edge
     gold_paths = [
         [canonical_edge(edge, inverse_map) for edge in path]
-        for path in record["gold_paths"]
+        for path in gold_annotations
     ]
     groups = [
         [[canonical_edge(edge, inverse_map) for edge in path] for path in group]

@@ -12,7 +12,7 @@ an offline decoded-trajectory evaluator.
 python -m code.model.evidence.evaluation --input decoded.json --output evidence_results.json --top-k 10
 ```
 
-Each input record has this shape:
+Evidence annotations are read from the existing dataset columns: `Path` for one trajectory or `Multi-Paths` for multiple trajectories. A singular `Path` contains triples directly; `Multi-Paths` may contain nested path groups. When both are present, `Multi-Paths` takes precedence. These annotations are gold references, never inference inputs. The old `gold_paths` key remains accepted for decoded-only compatibility. No `Evidence-Paths` column is required.\n\nEach decoded input record can have this shape:
 
 ```json
 {
@@ -22,8 +22,9 @@ Each input record has this shape:
     [[1, 12, 4]]
   ],
   "scores": [-0.2, -0.4],
-  "gold_paths": [
-    [[1, 10, 2], [2, 11, 3]]
+  "Multi-Paths": [
+    [[1, 10, 2], [2, 11, 3]],
+    [[1, 12, 4]]
   ],
   "evidence_groups": [
     [
@@ -37,10 +38,10 @@ Each input record has this shape:
 Each edge is `[head_entity_id, relation_id, tail_entity_id]`.
 `scores` are cumulative path log probabilities; higher is better.
 `evidence_groups` is optional: every outer group is required, and
-its inner paths are alternatives. `gold_paths` is the union-reference
+its inner paths are alternatives. `Path`/`Multi-Paths` (or the legacy decoded-only `gold_paths` key) specifies the union-reference
 edge set for edge precision/recall/F1. Alternative group coverage is
 reported separately to avoid conflating alternative and complementary
-evidence. All source labels must be annotated independently from
+evidence. Nested path grouping is flattened for the reference path set; it does not imply which paths are alternatives or jointly required. Only explicit `evidence_groups` specifies that semantics. All source labels must be annotated independently from
 question-answer correctness.
 
 The optional `control_relations` list prevents NO_OP/STOP/RESTART

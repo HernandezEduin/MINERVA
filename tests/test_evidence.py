@@ -1,12 +1,33 @@
 """Dependency-light evidence behavior tests."""
 import unittest
 
+from code.model.evidence.annotations import get_evidence_paths
 from code.model.evidence.evaluation import evaluate_record
 from code.model.evidence.retrieval import build_evidence_subgraph
 from code.model.evidence.supervision import lookup_gold_action, validate_gold_path
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_singular_path_annotation(self):
+        row = {"Path": "[['a', 'r', 'b'], ['b', 's', 'c']]"}
+        self.assertEqual(get_evidence_paths(row), [[['a','r','b'],['b','s','c']]])
+
+    def test_nested_multi_paths(self):
+        row = {"Multi-Paths": "[[[['a','r','b']]], [[['a','s','c']]]]"}
+        self.assertEqual(len(get_evidence_paths(row)), 2)
+
+    def test_multi_paths_takes_priority(self):
+        row = {"Path": "[['a','r','b']]", "Multi-Paths": "[[['a','s','c']]]"}
+        self.assertEqual(get_evidence_paths(row), [[['a','s','c']]])
+
+    def test_missing_paths_raises(self):
+        with self.assertRaises(ValueError):
+            get_evidence_paths({"Answer-Entity": "a"})
+
+    def test_evaluation_uses_path_column(self):
+        result = evaluate_record({"Path": [[1,2,3]], "trajectories": [[[1,2,3]]]}, 1)
+        self.assertEqual(result["metrics"]["f1"], 1.0)
+
     def test_union_deduplicates_paths_and_edges(self):
         paths = [[(1, 2, 3)], [(1, 2, 3)], [(1, 4, 5)]]
         result = build_evidence_subgraph(paths, [-0.1, -0.2, -0.3])
