@@ -891,11 +891,11 @@ class TrainerNLQ(object):
         all_final_backtrack_rate = 0
         all_final_unique_edges = 0
         all_final_redundancy = 0
-        all_final_segment_hops = 0
 
         all_hop_accuracy = defaultdict(float)  # Accuracy at each hop across all episodes, stored as {hop_index: (correct_count, total_count)}
         all_hop_mrr = defaultdict(float)       # MRR at each hop across all episodes, stored as {hop_index: (mrr_sum, total_count)}
         all_hop_count = defaultdict(float)     # Count of episodes that reached each hop, stored as {hop_index: count}
+        all_pred_hop_count = defaultdict(float) # Count of predicted hops at each hop across all episodes, stored as {hop_index: count}
 
         all_final_answer_recall = 0
         all_final_answer_precision = 0
@@ -1295,7 +1295,7 @@ class TrainerNLQ(object):
                 all_final_no_op_rate += no_op_rate
                 all_final_restart_rate += restart_rate
 
-                all_final_segment_hops += len(merged_path)          # Total hops taken in the final path (after cleaning)
+                all_pred_hop_count[gt_hop] += len(merged_path)      # Total hops taken in the final path (after cleaning) for this gold hop count
 
                 if self.use_stop_signal:
                     sample_hit = answer_hits[indx]
@@ -1469,7 +1469,9 @@ class TrainerNLQ(object):
         all_final_unique_edges /= total_examples
         all_final_redundancy /= total_examples
 
-        all_final_segment_hops /= total_examples
+        overall_pred_hop_count = sum(all_pred_hop_count.values()) / sum(all_hop_count.values())
+        for hop in all_pred_hop_count.keys():
+            all_pred_hop_count[hop] /= all_hop_count[hop]
 
         all_final_answer_recall /= evaluation_denominator
         all_final_answer_precision /= evaluation_denominator
@@ -1573,7 +1575,7 @@ class TrainerNLQ(object):
             score_file.write(f"\tMRR: {mrr:7.4f}\n")
             
             score_file.write(f"Per Hop Answer Metrics\n")
-            for i0 in all_hop_accuracy.keys():
+            for i0 in sorted(all_hop_accuracy.keys()):
                 score_file.write(f"\t{i0}-Hop\n")
                 score_file.write(f"\t\tHits@1: {all_hop_accuracy[i0]:7.4f}\n")
                 score_file.write(f"\t\tMRR: {all_hop_mrr[i0]:7.4f}\n")
@@ -1597,7 +1599,9 @@ class TrainerNLQ(object):
             score_file.write(f"\tBacktrack Rate: {all_final_backtrack_rate:7.4f}\n")
             score_file.write(f"\tUnique Edges: {all_final_unique_edges:7.4f}\n")
             score_file.write(f"\tRedundancy: {all_final_redundancy:7.4f}\n")
-            score_file.write(f"\tAvg Segment Hops: {all_final_segment_hops:7.4f}\n")
+            score_file.write(f"\tAvg Segment Hops: {overall_pred_hop_count:7.4f}\n")
+            for hop in sorted(all_pred_hop_count.keys()):
+                score_file.write(f"\t\t{hop}-Hop: {all_pred_hop_count[hop]:7.4f}\n")
             if self.use_stop_signal:
                 score_file.write(f"Stop Quality (Rollout-level)\n")
                 score_file.write(f"\tTermination Step: {all_final_termination_rollouts:7.4f}\n")
@@ -1633,7 +1637,7 @@ class TrainerNLQ(object):
                 score_file.write(f"	Precision: {all_final_path_precision:7.4f}\n")
                 score_file.write(f"	F1 Score: {overall_path_overlap_f1:7.4f}\n")
 
-                for hop in all_overlap_f1.keys():
+                for hop in sorted(all_overlap_f1.keys()):
                     score_file.write(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}\n")
 
                 if self.environment.has_paths():
@@ -1644,7 +1648,7 @@ class TrainerNLQ(object):
 
                 score_file.write("Path Edit Distance Metrics (PED)\n")
                 score_file.write(f"	Overall Average: {overall_edit_distance:7.4f}\n")
-                for hop in all_edit_distance.keys():
+                for hop in sorted(all_edit_distance.keys()):
                     score_file.write(f"		{hop}-Hop: {all_edit_distance[hop]:7.4f}\n")
             
             if self.environment.has_paths_or_keys():
@@ -1653,12 +1657,12 @@ class TrainerNLQ(object):
                 score_file.write(f"\tPrecision: {all_final_rel_precision:7.4f}\n")
                 score_file.write(f"\tF1 Score: {overall_rel_overlap_f1:7.4f}\n")
 
-                for hop in all_rel_overlap_f1.keys():
+                for hop in sorted(all_rel_overlap_f1.keys()):
                     score_file.write(f"\t\t{hop}-Hop: {all_rel_overlap_f1[hop]:7.4f}\n")
 
                 score_file.write("Relation Edit Distance Metrics (RED)\n")
                 score_file.write(f"\tOverall Average: {overall_rel_edit_distance:7.4f}\n")
-                for hop in all_rel_edit_distance.keys():
+                for hop in sorted(all_rel_edit_distance.keys()):
                     score_file.write(f"\t\t{hop}-Hop: {all_rel_edit_distance[hop]:7.4f}\n")
 
             score_file.write("\n") 
@@ -1672,7 +1676,7 @@ class TrainerNLQ(object):
         logger.info(f"\tMRR: {mrr:7.4f}")
 
         logger.info(f"Per Hop Answer Metrics")
-        for i0 in all_hop_accuracy.keys():
+        for i0 in sorted(all_hop_accuracy.keys()):
             logger.info(f"\t{i0}-Hop")
             logger.info(f"\t\tHits@1: {all_hop_accuracy[i0]:7.4f}")
             logger.info(f"\t\tMRR: {all_hop_mrr[i0]:7.4f}")
@@ -1696,7 +1700,9 @@ class TrainerNLQ(object):
         logger.info(f"\tBacktrack Rate: {all_final_backtrack_rate:7.4f}")
         logger.info(f"\tUnique Edges: {all_final_unique_edges:7.4f}")
         logger.info(f"\tRedundancy: {all_final_redundancy:7.4f}")
-        logger.info(f"\tAvg Segment Hops: {all_final_segment_hops:7.4f}")
+        logger.info(f"\tAvg Segment Hops: {overall_pred_hop_count:7.4f}")
+        for hop in sorted(all_pred_hop_count.keys()):
+            logger.info(f"\t\t{hop}-Hop: {all_pred_hop_count[hop]:7.4f}")
         if self.use_stop_signal:
             logger.info(f"Stop Quality (Rollout-level):")
             logger.info(f"\tTermination Step: {all_final_termination_rollouts:7.4f}")
@@ -1731,7 +1737,7 @@ class TrainerNLQ(object):
             logger.info(f"	Precision: {all_final_path_precision:7.4f}")
             logger.info(f"	F1 Score: {overall_path_overlap_f1:7.4f}")
 
-            for hop in all_overlap_f1.keys():
+            for hop in sorted(all_overlap_f1.keys()):
                 logger.info(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}")
 
             if self.environment.has_paths():
@@ -1742,7 +1748,7 @@ class TrainerNLQ(object):
 
             logger.info("Path Edit Distance Metrics (PED):")
             logger.info(f"	Overall Average: {overall_edit_distance:7.4f}")
-            for hop in all_edit_distance.keys():
+            for hop in sorted(all_edit_distance.keys()):
                 logger.info(f"		{hop}-Hop: {all_edit_distance[hop]:7.4f}")
         
         if self.environment.has_paths_or_keys():
@@ -1751,12 +1757,12 @@ class TrainerNLQ(object):
             logger.info(f"\tPrecision: {all_final_rel_precision:7.4f}")
             logger.info(f"\tF1 Score: {overall_rel_overlap_f1:7.4f}")
 
-            for hop in all_rel_overlap_f1.keys():
+            for hop in sorted(all_rel_overlap_f1.keys()):
                 logger.info(f"\t\t{hop}-Hop: {all_rel_overlap_f1[hop]:7.4f}")
 
             logger.info("Relation Edit Distance Metrics (RED):")
             logger.info(f"\tOverall Average: {overall_rel_edit_distance:7.4f}")
-            for hop in all_rel_edit_distance.keys():
+            for hop in sorted(all_rel_edit_distance.keys()):
                 logger.info(f"\t\t{hop}-Hop: {all_rel_edit_distance[hop]:7.4f}")
 
         # Log evaluation metrics to WANDB
@@ -1779,7 +1785,7 @@ class TrainerNLQ(object):
                     backtrack_rate=all_final_backtrack_rate,
                     unique_edges=all_final_unique_edges,
                     redundancy=all_final_redundancy,
-                    segment_hops=all_final_segment_hops,
+                    segment_hops=overall_pred_hop_count,
                     termination_steps=all_final_termination_steps,
                     stop_rate=all_stop_rate_top_rollout,
                     correct_stop_rate=all_correct_stop_rate_top_rollout,
@@ -1837,7 +1843,7 @@ class TrainerNLQ(object):
             backtrack_rate=all_final_backtrack_rate,
             unique_edges=all_final_unique_edges,
             redundancy=all_final_redundancy,
-            segment_hops=all_final_segment_hops,
+            segment_hops=overall_pred_hop_count,
             termination_steps=all_final_termination_steps,
             stop_rate=all_stop_rate_top_rollout,
             correct_stop_rate=all_correct_stop_rate_top_rollout,
