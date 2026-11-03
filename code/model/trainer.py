@@ -960,19 +960,21 @@ class TrainerNLQ(object):
         if path_metrics_enabled:
             all_final_path_recall = 0
             all_final_path_precision = 0
-            all_final_path_f1 = 0
             all_edit_distance = defaultdict(float)
+            all_overlap_f1 = defaultdict(float)
             all_path_hop_count = defaultdict(int)
             all_path_metric_examples = 0
             overall_edit_distance = 0
+            overall_path_overlap_f1 = 0
         else:
             all_final_path_recall = None
             all_final_path_precision = None
-            all_final_path_f1 = None
             all_edit_distance = None
+            all_overlap_f1 = None
             all_path_hop_count = None
             all_path_metric_examples = 0
             overall_edit_distance = None
+            overall_path_overlap_f1 = None
 
         if self.environment.has_paths():
             all_final_node_recall = 0
@@ -986,15 +988,17 @@ class TrainerNLQ(object):
         if self.environment.has_paths_or_keys():
             all_final_rel_recall = 0
             all_final_rel_precision = 0
-            all_final_rel_f1 = 0
             all_rel_edit_distance = defaultdict(float)
+            all_rel_overlap_f1 = defaultdict(float)
             overall_rel_edit_distance = 0
+            overall_rel_overlap_f1 = 0
         else:
             all_final_rel_recall = None
             all_final_rel_precision = None
-            all_final_rel_f1 = None
             all_rel_edit_distance = None
+            all_rel_overlap_f1 = None
             overall_rel_edit_distance = None
+            overall_rel_overlap_f1 = None
 
         mrr = 0                         # Overall results for MRR
         evaluation_weight_sum = 0.0
@@ -1313,7 +1317,7 @@ class TrainerNLQ(object):
                     precision, recall, f1_score = episode.get_subgraph_overlap(merged_path, b)
                     all_final_path_precision += sample_weight * precision
                     all_final_path_recall += sample_weight * recall
-                    all_final_path_f1 += sample_weight * f1_score
+                    all_overlap_f1[gt_hop] += sample_weight * f1_score
                     path_f1 = f1_score
 
                     precision, recall, f1_score = episode.get_node_coverage(entities_path, b)
@@ -1334,7 +1338,7 @@ class TrainerNLQ(object):
                         precision, recall, f1_score = overlap_scores
                         all_final_path_precision += sample_weight * precision
                         all_final_path_recall += sample_weight * recall
-                        all_final_path_f1 += sample_weight * f1_score
+                        all_overlap_f1[gt_hop] += sample_weight * f1_score
                         path_f1 = f1_score
 
                         all_edit_distance[gt_hop] += sample_weight * ed_dist
@@ -1345,7 +1349,7 @@ class TrainerNLQ(object):
                     precision, recall, f1_score = episode.get_relation_coverage(relations_path, b)
                     all_final_rel_precision += sample_weight * precision
                     all_final_rel_recall += sample_weight * recall
-                    all_final_rel_f1 += sample_weight * f1_score
+                    all_rel_overlap_f1[gt_hop] += sample_weight * f1_score
                     rel_f1 = f1_score
 
                     ed_rel_dist = episode.get_relation_edit_distance(relations_path, b)
@@ -1498,16 +1502,17 @@ class TrainerNLQ(object):
             if all_path_metric_examples > 0:
                 all_final_path_recall /= all_path_metric_examples
                 all_final_path_precision /= all_path_metric_examples
-                all_final_path_f1 /= all_path_metric_examples
 
                 overall_edit_distance = sum(all_edit_distance.values()) / sum(all_path_hop_count.values())
+                overall_path_overlap_f1 = sum(all_overlap_f1.values()) / sum(all_path_hop_count.values())
                 for hop in all_edit_distance.keys():
                     all_edit_distance[hop] /= all_path_hop_count[hop]
+                    all_overlap_f1[hop] /= all_path_hop_count[hop]
                 path_metrics_reportable = True
             else:
                 all_final_path_recall = None
                 all_final_path_precision = None
-                all_final_path_f1 = None
+                overall_path_overlap_f1 = None
                 overall_edit_distance = None
                 path_metrics_reportable = False
         else:
@@ -1521,11 +1526,12 @@ class TrainerNLQ(object):
         if self.environment.has_paths_or_keys():
             all_final_rel_recall /= evaluation_denominator
             all_final_rel_precision /= evaluation_denominator
-            all_final_rel_f1 /= evaluation_denominator
 
             overall_rel_edit_distance = sum(all_rel_edit_distance.values()) / sum(all_hop_count.values())
+            overall_rel_overlap_f1 = sum(all_rel_overlap_f1.values()) / sum(all_hop_count.values())
             for hop in all_rel_edit_distance.keys():
                 all_rel_edit_distance[hop] /= all_hop_count[hop]
+                all_rel_overlap_f1[hop] /= all_hop_count[hop]
 
         # Save best performing model based on hits@1
         if save_model:
@@ -1625,7 +1631,10 @@ class TrainerNLQ(object):
                 score_file.write(f"SubGraph Overlap Metrics (SG)\n")
                 score_file.write(f"	Recall: {all_final_path_recall:7.4f}\n")
                 score_file.write(f"	Precision: {all_final_path_precision:7.4f}\n")
-                score_file.write(f"	F1 Score: {all_final_path_f1:7.4f}\n")
+                score_file.write(f"	F1 Score: {overall_path_overlap_f1:7.4f}\n")
+
+                for hop in all_overlap_f1.keys():
+                    score_file.write(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}\n")
 
                 if self.environment.has_paths():
                     score_file.write(f"Node-Set Overlap Metrics\n")
@@ -1642,7 +1651,10 @@ class TrainerNLQ(object):
                 score_file.write(f"Relation-Set Overlap Metrics (REL)\n")
                 score_file.write(f"\tRecall: {all_final_rel_recall:7.4f}\n")
                 score_file.write(f"\tPrecision: {all_final_rel_precision:7.4f}\n")
-                score_file.write(f"\tF1 Score: {all_final_rel_f1:7.4f}\n")
+                score_file.write(f"\tF1 Score: {overall_rel_overlap_f1:7.4f}\n")
+
+                for hop in all_rel_overlap_f1.keys():
+                    score_file.write(f"\t\t{hop}-Hop: {all_rel_overlap_f1[hop]:7.4f}\n")
 
                 score_file.write("Relation Edit Distance Metrics (RED)\n")
                 score_file.write(f"\tOverall Average: {overall_rel_edit_distance:7.4f}\n")
@@ -1717,7 +1729,10 @@ class TrainerNLQ(object):
             logger.info("SubGraph Overlap Metrics (SG):")
             logger.info(f"	Recall: {all_final_path_recall:7.4f}")
             logger.info(f"	Precision: {all_final_path_precision:7.4f}")
-            logger.info(f"	F1 Score: {all_final_path_f1:7.4f}")
+            logger.info(f"	F1 Score: {overall_path_overlap_f1:7.4f}")
+
+            for hop in all_overlap_f1.keys():
+                logger.info(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}")
 
             if self.environment.has_paths():
                 logger.info("Node-Set Overlap Metrics:")
@@ -1734,7 +1749,10 @@ class TrainerNLQ(object):
             logger.info("Relation-Set Overlap Metrics (REL):")
             logger.info(f"\tRecall: {all_final_rel_recall:7.4f}")
             logger.info(f"\tPrecision: {all_final_rel_precision:7.4f}")
-            logger.info(f"\tF1 Score: {all_final_rel_f1:7.4f}")
+            logger.info(f"\tF1 Score: {overall_rel_overlap_f1:7.4f}")
+
+            for hop in all_rel_overlap_f1.keys():
+                logger.info(f"\t\t{hop}-Hop: {all_rel_overlap_f1[hop]:7.4f}")
 
             logger.info("Relation Edit Distance Metrics (RED):")
             logger.info(f"\tOverall Average: {overall_rel_edit_distance:7.4f}")
@@ -1783,13 +1801,13 @@ class TrainerNLQ(object):
                     answer_f1=all_final_answer_f1,
                     path_recall=all_final_path_recall,
                     path_precision=all_final_path_precision,
-                    path_f1=all_final_path_f1,
+                    path_f1=overall_path_overlap_f1,
                     node_recall=all_final_node_recall,
                     node_precision=all_final_node_precision,
                     node_f1=all_final_node_f1,
                     rel_recall=all_final_rel_recall,
                     rel_precision=all_final_rel_precision,
-                    rel_f1=all_final_rel_f1,
+                    rel_f1=overall_rel_overlap_f1,
                     edit_distance=overall_edit_distance,
                     edit_distance_by_hop=all_edit_distance,
                     valid_action_count=all_valid_action_count.mean(),
@@ -1843,13 +1861,13 @@ class TrainerNLQ(object):
             answer_f1=all_final_answer_f1,
             path_recall=all_final_path_recall,
             path_precision=all_final_path_precision,
-            path_f1=all_final_path_f1,
+            path_f1=overall_path_overlap_f1,
             node_recall=all_final_node_recall,
             node_precision=all_final_node_precision,
             node_f1=all_final_node_f1,
             rel_recall=all_final_rel_recall,
             rel_precision=all_final_rel_precision,
-            rel_f1=all_final_rel_f1,
+            rel_f1=overall_rel_overlap_f1,
             edit_distance=all_edit_distance,
             valid_action_count=all_valid_action_count,
             question_entropy=all_final_question_entropy,
