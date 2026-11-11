@@ -896,6 +896,8 @@ class TrainerNLQ(object):
         all_hop_mrr = defaultdict(float)       # MRR at each hop across all episodes, stored as {hop_index: (mrr_sum, total_count)}
         all_hop_count = defaultdict(float)     # Count of episodes that reached each hop, stored as {hop_index: count}
         all_pred_hop_count = defaultdict(float) # Count of predicted hops at each hop across all episodes, stored as {hop_index: count}
+        all_hop_correct_count = defaultdict(float) # Count of correct predictions at each hop across all episodes, stored as {hop_index: correct_count}
+        all_hop_incorrect_count = defaultdict(float) # Count of incorrect predictions at each hop across all episodes, stored as {hop_index: incorrect_count}
 
         all_final_answer_recall = 0
         all_final_answer_precision = 0
@@ -961,7 +963,11 @@ class TrainerNLQ(object):
             all_final_path_recall = 0
             all_final_path_precision = 0
             all_edit_distance = defaultdict(float)
+            edit_distance_answer_correct = defaultdict(float)
+            edit_distance_answer_incorrect = defaultdict(float)
             all_overlap_f1 = defaultdict(float)
+            overlap_f1_answer_correct = defaultdict(float)
+            overlap_f1_answer_incorrect = defaultdict(float)
             all_path_hop_count = defaultdict(int)
             all_path_metric_examples = 0
             overall_edit_distance = 0
@@ -970,7 +976,11 @@ class TrainerNLQ(object):
             all_final_path_recall = None
             all_final_path_precision = None
             all_edit_distance = None
+            edit_distance_answer_correct = None
+            edit_distance_answer_incorrect = None
             all_overlap_f1 = None
+            overlap_f1_answer_correct = None
+            overlap_f1_answer_incorrect = None
             all_path_hop_count = None
             all_path_metric_examples = 0
             overall_edit_distance = None
@@ -1218,6 +1228,7 @@ class TrainerNLQ(object):
             for b in range(temp_batch_size):
                 sample_weight = float(question_weights[b])
                 answer_pos = None
+                answer_in_top_path = False
                 seen = set()
                 pos = 0
                 gt_hop = episode.get_path_length(b)
@@ -1260,9 +1271,15 @@ class TrainerNLQ(object):
                                     if answer_pos < 1:
                                         final_reward_1 += sample_weight
                                         all_hop_accuracy[gt_hop] += sample_weight
+                                        answer_in_top_path = True
                 else:
                     final_mrr += 0
                     all_hop_mrr[gt_hop] += 0
+
+                if answer_in_top_path:
+                    all_hop_correct_count[gt_hop] += sample_weight
+                else:
+                    all_hop_incorrect_count[gt_hop] += sample_weight
                 
                 # Calculate additional metrics
 
@@ -1314,11 +1331,10 @@ class TrainerNLQ(object):
                     all_restart_and_hit_rate_top_rollout += restart_mask & sample_hit
 
                 if self.environment.has_paths():   # If path existence checking is enabled
-                    precision, recall, f1_score = episode.get_subgraph_overlap(merged_path, b)
+                    precision, recall, path_f1 = episode.get_subgraph_overlap(merged_path, b)
                     all_final_path_precision += sample_weight * precision
                     all_final_path_recall += sample_weight * recall
-                    all_overlap_f1[gt_hop] += sample_weight * f1_score
-                    path_f1 = f1_score
+                    all_overlap_f1[gt_hop] += sample_weight * path_f1
 
                     precision, recall, f1_score = episode.get_node_coverage(entities_path, b)
                     all_final_node_precision += sample_weight * precision
@@ -1329,28 +1345,41 @@ class TrainerNLQ(object):
                     all_edit_distance[gt_hop] += sample_weight * ed_dist
                     all_path_hop_count[gt_hop] += sample_weight
                     all_path_metric_examples += sample_weight
+
+                    if answer_in_top_path:
+                        edit_distance_answer_correct[gt_hop] += sample_weight * ed_dist
+                        overlap_f1_answer_correct[gt_hop] += sample_weight * path_f1
+                    else:
+                        edit_distance_answer_incorrect[gt_hop] += sample_weight * ed_dist
+                        overlap_f1_answer_incorrect[gt_hop] += sample_weight * path_f1
+
                 elif reconstruct_reference_path:
                     # Test-only multi-answer PED/F1_SG against all semantically valid
                     # entity-level paths generated from the Path-Key relation chain.
                     overlap_scores = episode.get_reconstructed_subgraph_overlap(merged_path, b)
                     ed_dist = episode.get_reconstructed_path_edit_distance(merged_path, b)
                     if overlap_scores is not None and ed_dist is not None:
-                        precision, recall, f1_score = overlap_scores
+                        precision, recall, path_f1 = overlap_scores
                         all_final_path_precision += sample_weight * precision
                         all_final_path_recall += sample_weight * recall
-                        all_overlap_f1[gt_hop] += sample_weight * f1_score
-                        path_f1 = f1_score
+                        all_overlap_f1[gt_hop] += sample_weight * path_f1
 
                         all_edit_distance[gt_hop] += sample_weight * ed_dist
                         all_path_hop_count[gt_hop] += sample_weight
                         all_path_metric_examples += sample_weight
-                
+
+                        if answer_in_top_path:
+                            edit_distance_answer_correct[gt_hop] += sample_weight * ed_dist
+                            overlap_f1_answer_correct[gt_hop] += sample_weight * path_f1
+                        else:
+                            edit_distance_answer_incorrect[gt_hop] += sample_weight * ed_dist
+                            overlap_f1_answer_incorrect[gt_hop] += sample_weight * path_f1
+
                 if self.environment.has_paths_or_keys():   # If relation path existence checking is enabled
-                    precision, recall, f1_score = episode.get_relation_coverage(relations_path, b)
+                    precision, recall, rel_f1 = episode.get_relation_coverage(relations_path, b)
                     all_final_rel_precision += sample_weight * precision
                     all_final_rel_recall += sample_weight * recall
-                    all_rel_overlap_f1[gt_hop] += sample_weight * f1_score
-                    rel_f1 = f1_score
+                    all_rel_overlap_f1[gt_hop] += sample_weight * rel_f1
 
                     ed_rel_dist = episode.get_relation_edit_distance(relations_path, b)
                     all_rel_edit_distance[gt_hop] += sample_weight * ed_rel_dist
@@ -1506,16 +1535,29 @@ class TrainerNLQ(object):
                 all_final_path_precision /= all_path_metric_examples
 
                 overall_edit_distance = sum(all_edit_distance.values()) / sum(all_path_hop_count.values())
+                overall_edit_distance_answer_correct = sum(edit_distance_answer_correct.values()) / sum(all_hop_correct_count.values())
+                overall_edit_distance_answer_incorrect = sum(edit_distance_answer_incorrect.values()) / sum(all_hop_incorrect_count.values())
                 overall_path_overlap_f1 = sum(all_overlap_f1.values()) / sum(all_path_hop_count.values())
+                overall_overlap_f1_answer_correct = sum(overlap_f1_answer_correct.values()) / sum(all_hop_correct_count.values())
+                overall_overlap_f1_answer_incorrect = sum(overlap_f1_answer_incorrect.values()) / sum(all_hop_incorrect_count.values())
                 for hop in all_edit_distance.keys():
                     all_edit_distance[hop] /= all_path_hop_count[hop]
+                    edit_distance_answer_correct[hop] /= all_hop_correct_count[hop] if all_hop_correct_count[hop] > 0 else 0.0
+                    edit_distance_answer_incorrect[hop] /= all_hop_incorrect_count[hop] if all_hop_incorrect_count[hop] > 0 else 0.0
                     all_overlap_f1[hop] /= all_path_hop_count[hop]
+                    overlap_f1_answer_correct[hop] /= all_hop_correct_count[hop] if all_hop_correct_count[hop] > 0 else 0.0
+                    overlap_f1_answer_incorrect[hop] /= all_hop_incorrect_count[hop] if all_hop_incorrect_count[hop] > 0 else 0.0
+
                 path_metrics_reportable = True
             else:
                 all_final_path_recall = None
                 all_final_path_precision = None
                 overall_path_overlap_f1 = None
                 overall_edit_distance = None
+                overall_edit_distance_answer_correct = None
+                overall_edit_distance_answer_incorrect = None
+                overall_overlap_f1_answer_correct = None
+                overall_overlap_f1_answer_incorrect = None
                 path_metrics_reportable = False
         else:
             path_metrics_reportable = False
@@ -1640,6 +1682,15 @@ class TrainerNLQ(object):
                 for hop in sorted(all_overlap_f1.keys()):
                     score_file.write(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}\n")
 
+                score_file.write(f"SubGraph Overlap Metrics (SG) - Answer Correct\n")
+                score_file.write(f" Overall F1 Score: {overall_overlap_f1_answer_correct:7.4f}\n")
+                for hop in sorted(overlap_f1_answer_correct.keys()):
+                    score_file.write(f"		{hop}-Hop: {overlap_f1_answer_correct[hop]:7.4f}\n")
+                score_file.write(f"SubGraph Overlap Metrics (SG) - Answer Incorrect\n")
+                score_file.write(f" Overall F1 Score: {overall_overlap_f1_answer_incorrect:7.4f}\n")
+                for hop in sorted(overlap_f1_answer_incorrect.keys()):
+                    score_file.write(f"		{hop}-Hop: {overlap_f1_answer_incorrect[hop]:7.4f}\n")
+
                 if self.environment.has_paths():
                     score_file.write(f"Node-Set Overlap Metrics\n")
                     score_file.write(f"	Recall: {all_final_node_recall:7.4f}\n")
@@ -1650,6 +1701,15 @@ class TrainerNLQ(object):
                 score_file.write(f"	Overall Average: {overall_edit_distance:7.4f}\n")
                 for hop in sorted(all_edit_distance.keys()):
                     score_file.write(f"		{hop}-Hop: {all_edit_distance[hop]:7.4f}\n")
+
+                score_file.write("Path Edit Distance Metrics (PED) - Answer Correct\n")
+                score_file.write(f"	Overall Average: {overall_edit_distance_answer_correct:7.4f}\n")
+                for hop in sorted(edit_distance_answer_correct.keys()):
+                    score_file.write(f"		{hop}-Hop: {edit_distance_answer_correct[hop]:7.4f}\n")
+                score_file.write("Path Edit Distance Metrics (PED) - Answer Incorrect\n")
+                score_file.write(f"	Overall Average: {overall_edit_distance_answer_incorrect:7.4f}\n")
+                for hop in sorted(edit_distance_answer_incorrect.keys()):
+                    score_file.write(f"		{hop}-Hop: {edit_distance_answer_incorrect[hop]:7.4f}\n")
             
             if self.environment.has_paths_or_keys():
                 score_file.write(f"Relation-Set Overlap Metrics (REL)\n")
@@ -1740,6 +1800,16 @@ class TrainerNLQ(object):
             for hop in sorted(all_overlap_f1.keys()):
                 logger.info(f"		{hop}-Hop: {all_overlap_f1[hop]:7.4f}")
 
+            logger.info("SubGraph Overlap Metrics (SG) - Answer Correct:")
+            logger.info(f"	Overall F1 Score: {overall_overlap_f1_answer_correct:7.4f}")
+            for hop in sorted(overlap_f1_answer_correct.keys()):
+                logger.info(f"		{hop}-Hop: {overlap_f1_answer_correct[hop]:7.4f}")
+            
+            logger.info("SubGraph Overlap Metrics (SG) - Answer Incorrect:")
+            logger.info(f"	Overall F1 Score: {overall_overlap_f1_answer_incorrect:7.4f}")
+            for hop in sorted(overlap_f1_answer_incorrect.keys()):
+                logger.info(f"		{hop}-Hop: {overlap_f1_answer_incorrect[hop]:7.4f}")
+
             if self.environment.has_paths():
                 logger.info("Node-Set Overlap Metrics:")
                 logger.info(f"	Recall: {all_final_node_recall:7.4f}")
@@ -1750,6 +1820,15 @@ class TrainerNLQ(object):
             logger.info(f"	Overall Average: {overall_edit_distance:7.4f}")
             for hop in sorted(all_edit_distance.keys()):
                 logger.info(f"		{hop}-Hop: {all_edit_distance[hop]:7.4f}")
+
+            logger.info("Path Edit Distance Metrics (PED) - Answer Correct:")
+            logger.info(f"	Overall Average: {overall_edit_distance_answer_correct:7.4f}")
+            for hop in sorted(edit_distance_answer_correct.keys()):
+                logger.info(f"		{hop}-Hop: {edit_distance_answer_correct[hop]:7.4f}")
+            logger.info("Path Edit Distance Metrics (PED) - Answer Incorrect:")
+            logger.info(f"	Overall Average: {overall_edit_distance_answer_incorrect:7.4f}")
+            for hop in sorted(edit_distance_answer_incorrect.keys()):
+                logger.info(f"		{hop}-Hop: {edit_distance_answer_incorrect[hop]:7.4f}")
         
         if self.environment.has_paths_or_keys():
             logger.info("Relation-Set Overlap Metrics (REL):")
