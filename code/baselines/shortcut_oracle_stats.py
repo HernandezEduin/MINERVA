@@ -1,14 +1,18 @@
 import argparse
+import os
+from contextlib import nullcontext
 from typing import Any, Dict, List
 
 import numpy as np
 from tqdm import tqdm
 
+from code.baselines.baseline_path_logging import format_path_report
 from code.baselines.baseline_path_fidelity import (
     aggregate_per_question,
     aggregate_value,
     answer_set,
     build_grapher,
+    cleaned_path_and_relations,
     compute_path_fidelity,
     default_cache_path,
     effective_reference_length,
@@ -65,10 +69,13 @@ def parse_args() -> argparse.Namespace:
                         choices=["raw", "truncate_at_stop", "final_segment", "final_segment_truncate"])
     parser.add_argument("--output", default="shortcut_oracle_stats.json")
     parser.add_argument("--output-format", choices=["json", "csv"], default="json")
+    parser.add_argument("--paths-output", default=None, metavar="FILE",
+                        help="Optional MINERVA-style text log of the deterministic shortest path per question.")
     return parser.parse_args()
 
 
-def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: argparse.Namespace):
+def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: argparse.Namespace,
+                   path_output=None, tokenizer=None, vocab_maps=None):
     hop_budget = args.max_hops if args.max_hops is not None else args.num_rollout_steps
     episode = make_episode(
         grapher=grapher,
@@ -107,6 +114,27 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
         exact_match = exact_reference_match(episode, path or [], local_idx) if path is not None else None
         reference_len = effective_reference_length(episode, local_idx)
         shortest_len = len(path) if path is not None else None
+
+        if path_output is not None:
+            id2ent, id2rel, ent2name, rel2name = vocab_maps
+            cleaned_path = cleaned_path_and_relations(episode, path, args.path_segment_policy)[0] if path is not None else None
+            path_output.write(format_path_report(
+                question_id=row_id(row, local_idx),
+                question_tokens=row[metadata.get("question_column") or "Question"],
+                tokenizer=tokenizer,
+                start=start,
+                answers=answers,
+                episode=episode,
+                question_index=local_idx,
+                raw_path=path,
+                cleaned_path=cleaned_path,
+                metrics=metrics,
+                reference_length=reference_len,
+                id2ent=id2ent,
+                id2rel=id2rel,
+                ent2name=ent2name,
+                rel2name=rel2name,
+            ))
 
         per_question: Dict[str, Any] = {
             "split": name,
@@ -167,8 +195,10 @@ def print_summary(summary: Dict[str, Any], output_path: str) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.paths_output and os.path.abspath(args.paths_output) == os.path.abspath(args.output):
+        raise ValueError("--paths-output and --output must be different files.")
     hop_budget = args.max_hops if args.max_hops is not None else args.num_rollout_steps
-    frames, metadata, ent2id, rel2id, _, _, _, _ = load_eval_frames(
+    frames, metadata, ent2id, rel2id, id2ent, id2rel, ent2name, rel2name = load_eval_frames(
         data_input_dir=args.data_input_dir,
         question_path=args.question_path,
         cached_qa_metadata_path=args.cached_qa_metadata_path,
@@ -189,10 +219,22 @@ def main() -> None:
     )
 
     per_question: List[Dict[str, Any]] = []
-    for split_name, df in frames:
-        if args.max_samples is not None:
-            df = df.head(args.max_samples)
-        per_question.extend(evaluate_split(split_name, df, metadata, grapher, args))
+    if args.paths_output:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(args.question_tokenizer_name)
+        os.makedirs(os.path.dirname(args.paths_output) or ".", exist_ok=True)
+    else:
+        tokenizer = None
+    path_context = open(args.paths_output, "w", encoding="utf-8") if args.paths_output else nullcontext(None)
+    with path_context as path_output:
+        for split_name, df in frames:
+            if args.max_samples is not None:
+                df = df.head(args.max_samples)
+            per_question.extend(evaluate_split(
+                split_name, df, metadata, grapher, args,
+                path_output=path_output, tokenizer=tokenizer,
+                vocab_maps=(id2ent, id2rel, ent2name, rel2name),
+            ))
 
     summary = aggregate_per_question(per_question, METRIC_NAMES)
     n = len(per_question)
@@ -240,6 +282,8 @@ def main() -> None:
     payload = {"summary": summary, "per_question": per_question}
     output_path = write_results(args.output, args.output_format, payload)
     print_summary(summary, output_path)
+    if args.paths_output:
+        print(f"Path log (shortest path/question): {args.paths_output}")
 
 
 if __name__ == "__main__":

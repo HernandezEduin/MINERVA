@@ -1,9 +1,12 @@
 import argparse
+import os
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 from tqdm import tqdm
 
+from code.baselines.baseline_path_logging import format_path_report
 from code.baselines.baseline_path_fidelity import (
     aggregate_per_question,
     aggregate_value,
@@ -68,6 +71,9 @@ def parse_args() -> argparse.Namespace:
                         help="Preserve legacy RW-Path reporting: sampled exact annotated-path hit rate when entity paths are available.")
     parser.add_argument("--output", default="random_walk_stats.json")
     parser.add_argument("--output-format", choices=["json", "csv"], default="json")
+    parser.add_argument("--paths-output", default=None, metavar="FILE",
+                        help="Optional MINERVA-style text log: first sampled walk per question (unranked). "
+                             "Does not change random draws or aggregated statistics.")
     return parser.parse_args()
 
 
@@ -94,7 +100,8 @@ def metric_means(metrics: List[Dict[str, Optional[float]]]) -> Dict[str, Optiona
     return out
 
 
-def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: argparse.Namespace, rng: np.random.Generator):
+def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: argparse.Namespace,
+                   rng: np.random.Generator, path_output=None, tokenizer=None, vocab_maps=None):
     hop_budget = args.max_hops if args.max_hops is not None else args.num_rollout_steps
     episode = make_episode(
         grapher=grapher,
@@ -119,13 +126,36 @@ def evaluate_split(name: str, df: Any, metadata: Dict[str, Any], grapher, args: 
         exact_path_hits: List[float] = []
         predicted_lengths: List[int] = []
 
-        for _ in range(args.num_walks):
+        for walk_idx in range(args.num_walks):
             raw_path = sample_walk(grapher, start, hop_budget, rng, args.use_self_loops)
             cleaned, _ = cleaned_path_and_relations(episode, raw_path, args.path_segment_policy)
             predicted_lengths.append(len(cleaned))
             final_entity = raw_path[-1][2] if raw_path else start
             answer_hits.append(1.0 if int(final_entity) in answers else 0.0)
-            walk_metrics.append(compute_path_fidelity(episode, raw_path, local_idx, args.path_segment_policy))
+            one_walk_metrics = compute_path_fidelity(episode, raw_path, local_idx, args.path_segment_policy)
+            walk_metrics.append(one_walk_metrics)
+
+            if path_output is not None and walk_idx == 0:
+                id2ent, id2rel, ent2name, rel2name = vocab_maps
+                path_output.write(format_path_report(
+                    question_id=row_id(row, local_idx),
+                    question_tokens=row[metadata.get("question_column") or "Question"],
+                    tokenizer=tokenizer,
+                    start=start,
+                    answers=answers,
+                    episode=episode,
+                    question_index=local_idx,
+                    raw_path=raw_path,
+                    cleaned_path=cleaned,
+                    metrics=one_walk_metrics,
+                    reference_length=effective_reference_length(episode, local_idx),
+                    id2ent=id2ent,
+                    id2rel=id2rel,
+                    ent2name=ent2name,
+                    rel2name=rel2name,
+                    walk_number=1,
+                    num_walks=args.num_walks,
+                ))
 
             if args.use_ideal_paths and episode.paths_exists:
                 exact_match = exact_reference_match(episode, cleaned, local_idx)
@@ -190,8 +220,10 @@ def print_summary(summary: Dict[str, Any], output_path: Optional[str]) -> None:
 
 def main() -> None:
     args = parse_args()
+    if args.paths_output and os.path.abspath(args.paths_output) == os.path.abspath(args.output):
+        raise ValueError("--paths-output and --output must be different files.")
     hop_budget = args.max_hops if args.max_hops is not None else args.num_rollout_steps
-    frames, metadata, ent2id, rel2id, _, _, _, _ = load_eval_frames(
+    frames, metadata, ent2id, rel2id, id2ent, id2rel, ent2name, rel2name = load_eval_frames(
         data_input_dir=args.data_input_dir,
         question_path=args.question_path,
         cached_qa_metadata_path=args.cached_qa_metadata_path,
@@ -213,10 +245,22 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     per_question: List[Dict[str, Any]] = []
-    for split_name, df in frames:
-        if args.max_samples is not None:
-            df = df.head(args.max_samples)
-        per_question.extend(evaluate_split(split_name, df, metadata, grapher, args, rng))
+    if args.paths_output:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(args.question_tokenizer_name)
+        os.makedirs(os.path.dirname(args.paths_output) or ".", exist_ok=True)
+    else:
+        tokenizer = None
+    path_context = open(args.paths_output, "w", encoding="utf-8") if args.paths_output else nullcontext(None)
+    with path_context as path_output:
+        for split_name, df in frames:
+            if args.max_samples is not None:
+                df = df.head(args.max_samples)
+            per_question.extend(evaluate_split(
+                split_name, df, metadata, grapher, args, rng,
+                path_output=path_output, tokenizer=tokenizer,
+                vocab_maps=(id2ent, id2rel, ent2name, rel2name),
+            ))
 
     summary = aggregate_per_question(per_question, METRIC_NAMES)
     rw_ans_instance_micro, rw_ans_family_macro = aggregate_value(
@@ -253,6 +297,8 @@ def main() -> None:
     payload = {"summary": summary, "per_question": per_question}
     output_path = write_results(args.output, args.output_format, payload)
     print_summary(summary, output_path)
+    if args.paths_output:
+        print(f"Path log (first sampled walk/question): {args.paths_output}")
 
 
 if __name__ == "__main__":
