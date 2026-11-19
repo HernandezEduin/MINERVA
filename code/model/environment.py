@@ -103,6 +103,7 @@ class EpisodeNLQ(object):
         path_hops: Optional[List[int]] = None,
         question_family_ids: Optional[List[Any]] = None,
         question_family_sizes: Optional[List[int]] = None,
+        ques_ids: Optional[List[Any]] = None
     ) -> None:
         """
         Initialize a reinforcement learning episode for knowledge graph reasoning.
@@ -148,6 +149,7 @@ class EpisodeNLQ(object):
         self.path_hops = path_hops
         self.question_family_ids = question_family_ids
         self.question_family_sizes = question_family_sizes
+        self.question_ids = ques_ids
         self._semantic_valid_path_cache: Dict[int, List[List[Tuple[int, int, int]]]] = {}
         self.current_hop = 0
         self.no_examples = start_entities.shape[0]
@@ -620,6 +622,17 @@ class EpisodeNLQ(object):
             return len(keys[0])
 
         return 0
+
+    def get_ques_id(self, idx: int) -> Optional[Any]:
+        """
+        Get the question ID for a given question index.
+
+        Returns:
+            The question ID for the question; or None if question IDs are not available.
+        """
+        if self.question_ids is not None:
+            return self.question_ids[idx]
+        return None
 
     def get_reconstructed_reference_paths(self, idx: int) -> List[List[Tuple[int, int, int]]]:
         """
@@ -1508,6 +1521,7 @@ class EnvNLQ(object):
                     paths=None,
                     path_keys=None,
                     path_hops=None,
+                    ques_ids=None,
                 )
         else:
             for data in self.batcher.yield_next_batch_test():
@@ -1532,6 +1546,7 @@ class EnvNLQ(object):
                     path_hops=hops,
                     question_family_ids=family_ids,
                     question_family_sizes=family_sizes,
+                    ques_ids=ques_ids
                 )
 
     def change_mode(self, mode: str) -> None:

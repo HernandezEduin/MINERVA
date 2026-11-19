@@ -1412,7 +1412,8 @@ class TrainerNLQ(object):
                             gt_path += f" --> [{rel}] "
 
                     # Question Header Information
-                    paths[question_txt].append(f"{question_txt.strip().capitalize()}\n")
+                    paths[question_txt].append(f"Question ID:      {episode.get_ques_id(b)}\n")
+                    paths[question_txt].append(f"Question:         {question_txt.strip().capitalize()}\n")
                     paths[question_txt].append(f"Start Entity:     {start_e}\n")
                     paths[question_txt].append(f"Gold Answer:      {end_e}\n")
 
