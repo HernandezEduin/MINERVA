@@ -1454,7 +1454,7 @@ class TrainerNLQ(object):
                     paths[question_txt].append(f"Path (Raw):       {question_path_raw}\n")
 
                     # Print Metrics
-                    if self.environment.has_paths(): 
+                    if self.environment.has_paths() or reconstruct_reference_path: 
                         paths[question_txt].append(f"Path F1 Score(↑): {path_f1:.4f}\n")
                         paths[question_txt].append(f"Edit Distance(↓): {ed_dist:.4f}\n")
                         paths[question_txt].append(f"R-T Edit Dist(↓): {ed_pair_dist:.4f}\n")
