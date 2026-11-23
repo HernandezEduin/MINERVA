@@ -721,6 +721,14 @@ class EpisodeNLQ(object):
         if r in self.grapher.inverse_tokens:
             return self.grapher.inverse_mapping[r]
         return r
+
+    def project_edge(
+        self,
+        edge: Tuple[int, int, int],
+        include_head: bool = True,
+    ) -> Tuple[int, ...]:
+        """Return (h, r, t) if include_head, otherwise (r, t)."""
+        return edge if include_head else edge[1:]
     
     def is_inverse_rel(self, r_prev: int, r_cur: int) -> bool:
         """
@@ -890,7 +898,7 @@ class EpisodeNLQ(object):
 
         return best if best is not None else (0.0, 0.0, 0.0)
 
-    def get_path_edit_distance(self, pred_path: List[List[int]], idx: int) -> float:
+    def get_path_edit_distance(self, pred_path: List[List[int]], idx: int, include_head: bool = True) -> float:
         """
         PED: Best-reference Path Edit Distance against released reference paths.
 
@@ -912,6 +920,11 @@ class EpisodeNLQ(object):
                 IDs. The path may contain special actions.
             idx:
                 Question index used to retrieve the released reference paths.
+            include_head:
+                Whether to include the head entity in the projected edge representation
+                for edit distance computation. If False, only (relation, tail) pairs
+                are used, which is useful for evaluating relation chains without regard
+                to the specific starting entity.
 
         Returns:
             float:
@@ -928,17 +941,17 @@ class EpisodeNLQ(object):
 
         # Filter out no-op, restart, and stop signals from both paths
         pred_clean = [
-            self.canon_edge(h, r, t)
+            self.project_edge(self.canon_edge(h, r, t), include_head=include_head)
             for h, r, t in pred_path
             if r not in self.special_tokens
         ]
 
         return float(min(
-            edit_distance(pred_clean, [(h, r, t) for h, r, t in gt_path])[0]
+            edit_distance(pred_clean, [self.project_edge(tuple(edge), include_head=include_head) for edge in gt_path])[0]
             for gt_path in gt_paths
         ))
 
-    def get_reconstructed_path_edit_distance(self, pred_path: List[List[int]], idx: int) -> Optional[float]:
+    def get_reconstructed_path_edit_distance(self, pred_path: List[List[int]], idx: int, include_head: bool = True) -> Optional[float]:
         """
         PED against graph-reconstructed reference paths.
 
@@ -966,6 +979,11 @@ class EpisodeNLQ(object):
             idx:
                 Question index used to retrieve the source entity, answer set, and
                 annotated relation chain(s).
+            include_head:
+                Whether to include the head entity in the projected edge representation
+                for edit distance computation. If False, only (relation, tail) pairs
+                are used, which is useful for evaluating relation chains without regard
+                to the specific starting entity.
 
         Returns:
             Optional[float]:
@@ -977,14 +995,14 @@ class EpisodeNLQ(object):
         if not valid_paths:
             return None
 
-        pred_path = [self.canon_edge(h, r, t) for h, r, t in pred_path if r not in self.special_tokens]
+        pred_path = [self.project_edge(self.canon_edge(h, r, t), include_head=include_head) for h, r, t in pred_path if r not in self.special_tokens]
         distances = []
         for gt_path in valid_paths:
-            ed_dist, _, _ = edit_distance(pred_path, [(h, r, t) for h, r, t in gt_path])
+            ed_dist, _, _ = edit_distance(pred_path, [self.project_edge(tuple(edge), include_head=include_head) for edge in gt_path])
             distances.append(ed_dist)
         return float(min(distances))
 
-    def get_reconstructed_subgraph_overlap(self, pred_path: List[List[int]], idx: int) -> Optional[Tuple[float, float, float]]:
+    def get_reconstructed_subgraph_overlap(self, pred_path: List[List[int]], idx: int, include_head: bool = True) -> Optional[Tuple[float, float, float]]:
         """
         F1_SG against graph-reconstructed reference paths.
 
@@ -1015,6 +1033,11 @@ class EpisodeNLQ(object):
             idx:
                 Question index used to retrieve the source entity, answer set, and
                 annotated relation chain(s).
+            include_head:
+                Whether to include the head entity in the projected edge representation
+                for F1 computation. If False, only (relation, tail) pairs are used,
+                which is useful for evaluating relation chains without regard to the
+                specific starting entity.
 
         Returns:
             Optional[Tuple[float, float, float]]:
@@ -1027,14 +1050,14 @@ class EpisodeNLQ(object):
             return None
 
         pred_edges = set(
-            self.canon_edge(h, r, t)
+            self.project_edge(self.canon_edge(h, r, t), include_head=include_head)
             for h, r, t in pred_path
             if r not in self.special_tokens
         )
 
         best: Optional[Tuple[float, float, float]] = None
         for gt_path in valid_paths:
-            gt_edges = set((h, r, t) for h, r, t in gt_path)
+            gt_edges = set(self.project_edge((h, r, t), include_head=include_head) for h, r, t in gt_path)
             scores = compute_precision_recall_f1(pred_edges, gt_edges)
             if best is None or scores[2] > best[2]:
                 best = scores
